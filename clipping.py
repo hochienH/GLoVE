@@ -4,46 +4,40 @@
 # reed the dataset and find the minimum value
 import pandas as pd
 import numpy as np
-data = pd.read_csv('Dataset/data/ml_dataset_alpha101_volatility.csv')
-# the feature is var_true_90
-min_value = data['var_true_90'].min()
-# print(f"The minimum value of var_true_90 is: {min_value}")
-# output: The minimum value of var_true_90 is: 8.492946684691027e-37
 
-# we want to print out the distribution of the magnitude of the values var_true_90
-data['magnitude'] = data['var_true_90'].apply(lambda x: np.floor(np.log10(x)) if x > 0 else np.nan)
-magnitude_counts = data['magnitude'].value_counts().sort_index()
-# print("Distribution of the magnitude of var_true_90:")
-# for mag, count in magnitude_counts.items():
-#     print(f"10^{int(mag)}: {count} values")
-# output:
-"""
-Distribution of the magnitude of var_true_90:
-10^-37: 1 values
-10^-36: 1 values
-10^-19: 1 values
-10^-17: 1 values
-10^-16: 1 values
-10^-15: 1 values
-10^-14: 6 values
-10^-13: 9 values
-10^-12: 45 values
-10^-11: 95 values
-10^-10: 400 values
-10^-9: 1174 values
-10^-8: 3680 values
-10^-7: 10907 values
-10^-6: 30319 values
-10^-5: 74009 values
-10^-4: 81601 values
-10^-3: 22120 values
-10^-2: 341 values
-"""
+def clipping(input_path: str, clip_value: float):
+    data = pd.read_csv(input_path)
+    data['var_true_90_clipped'] = data['var_true_90'].clip(lower=clip_value)
+    return data
 
-# we try to clip the values smaller than 1e-12
-data['var_true_90_clipped'] = data['var_true_90'].clip(lower=1e-12)
-min_value_clipped = data['var_true_90_clipped'].min()
-# print(f"The minimum value of var_true_90 after clipping is: {min_value_clipped}")
+def clip_value_analysis(input_path: str):
+    data = pd.read_csv(input_path)
+    min_value = data['var_true_90'].min()
+    print(f"The minimum value of var_true_90 is: {min_value}")
 
-# store the clipped dataset into alpha101_volatility_clipped.csv
-data.to_csv('Dataset/data/ml_dataset_alpha101_volatility_clipped.csv', index=False)
+    data['magnitude'] = data['var_true_90'].apply(lambda x: np.floor(np.log10(x)) if x > 0 else np.nan)
+    magnitude_counts = data['magnitude'].value_counts().sort_index()
+    print("Distribution of the magnitude of var_true_90:")
+    for mag, count in magnitude_counts.items():
+        print(f"10^{int(mag)}: {count} values")
+
+def auto_clip_value(input_path: str) -> float:
+    # the auto clip value is set if each magnitude count is less than 10 for that magnitude and lower, not cumulative
+    data = pd.read_csv(input_path)
+    data['magnitude'] = data['var_true_90'].apply(lambda x: np.floor(np.log10(x)) if x > 0 else np.nan)
+    magnitude_counts = data['magnitude'].value_counts().sort_index()
+    auto_clip = None
+    for mag in sorted(magnitude_counts.index):
+        if magnitude_counts[mag] < 10:
+            auto_clip = 10 ** (mag + 1)
+        else:
+            break
+    print(f"Auto clip value determined: {auto_clip}")
+    return auto_clip
+
+if __name__ == "__main__":
+    input_path = "Dataset/data/ml_dataset_alpha101_volatility.csv"
+    # to analysis datasets magnitude distribution and minimum value, execute the following line
+    # clip_value_analysis(input_path)
+    auto_clip = auto_clip_value(input_path)
+    clipping(input_path, auto_clip)
