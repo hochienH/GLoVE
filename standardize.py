@@ -18,7 +18,9 @@ def standardize_columns(data: pd.DataFrame) -> pd.DataFrame:
     # Z-score standardization for each column
     # Using vectorized operation for efficiency
     subset = data[cols_to_standardize]
+    # if std is zero, then the standardized value will be NaN, handle that case
     standardized_subset = (subset - subset.mean()) / subset.std()
+    standardized_subset = standardized_subset.fillna(0)
     
     # Rename columns to have '_standardized' suffix
     standardized_subset.columns = [f"{col}_standardized" for col in cols_to_standardize]
