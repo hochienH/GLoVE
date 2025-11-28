@@ -64,6 +64,16 @@ def load_and_split_datasets(json_folder, prediction_length, freq):
                     max_ids_per_layer[i] = val
 
             dynamics = np.array(inst["feat_dynamic_real"]) 
+
+            # [Fix Data Leakage]
+            # Shift dynamic features by 1 timestep.
+            # Original: dynamics[t] contains info from time t (e.g. Close[t]).
+            # Target: target[t] is derived from time t.
+            # We must use dynamics[t-1] to predict target[t].
+            shifted_dynamics = np.zeros_like(dynamics)
+            shifted_dynamics[:, 1:] = dynamics[:, :-1]
+            shifted_dynamics[:, 0] = 0  # Pad with 0 for the first step
+            dynamics = shifted_dynamics
             total_len = len(target)
             
             min_length = CONTEXT_LENGTH + prediction_length

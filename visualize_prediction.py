@@ -46,6 +46,14 @@ for json_file in files:
         statics = inst["feat_static_cat"]
         raw_dynamics = inst["feat_dynamic_real"]
 
+        # [Fix Data Leakage]
+        # Shift dynamic features by 1 timestep.
+        dynamics_arr = np.array(raw_dynamics)
+        shifted_dynamics = np.zeros_like(dynamics_arr)
+        shifted_dynamics[:, 1:] = dynamics_arr[:, :-1]
+        shifted_dynamics[:, 0] = 0
+        raw_dynamics = shifted_dynamics.tolist()
+
         # ==========================================
         # 🛡️ 防呆檢查 (Sanity Check)
         # ==========================================
