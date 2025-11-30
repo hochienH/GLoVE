@@ -8,7 +8,7 @@ def standardize_columns(data: pd.DataFrame) -> pd.DataFrame:
     # Define columns to standardize
     target_columns = ['log_return', 'u_hat_90']
     # Add alpha101 columns (alpha001 to alpha101)
-    target_columns.extend([f'alpha{i:03d}' for i in range(1, 102)])
+    target_columns.extend([f'alpha{i:03d}' for i in range(1, 172)])
     # Filter columns that actually exist in the dataframe
     cols_to_standardize = [col for col in target_columns if col in data.columns]
     
