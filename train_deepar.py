@@ -3,8 +3,17 @@ import glob
 import os
 import numpy as np
 import torch
-from pathlib import Path
 
+_original_torch_load = torch.load
+
+def _unsafe_global_load(*args, **kwargs):
+    kwargs['weights_only'] = False
+    return _original_torch_load(*args, **kwargs)
+
+# 替換官方函式
+torch.load = _unsafe_global_load
+
+from pathlib import Path
 from gluonts.dataset.common import ListDataset
 from gluonts.torch.model.deepar import DeepAREstimator
 from gluonts.evaluation import make_evaluation_predictions, Evaluator
