@@ -86,7 +86,7 @@ def main():
         import csv
         with open(args.output, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(["Tickers", "MAE_model", "RMSE_model", "MAE_garch", "RMSE_garch"])
+            writer.writerow(["code", "MAE_model", "RMSE_model", "MAE_garch", "RMSE_garch"])
             for row in results:
                 writer.writerow(row)
         print(f"Evaluation metrics saved to {args.output}")
