@@ -1,4 +1,3 @@
-Dataset
 original_data
 __pycache__
 gluonTS_Dataset
@@ -6,3 +5,4 @@ lightning_logs
 visualization_plots
 trained_model
 *.zip
+Dataset
