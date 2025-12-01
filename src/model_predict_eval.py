@@ -63,15 +63,44 @@ def main() -> None:
     with open(args.data, "rb") as f:
         dataset = pickle.load(f)
 
-    test_targets: List[Optional[TimeSeries]] = dataset["test"]["target"]
-    test_covs: List[Optional[TimeSeries]] = dataset["test"]["cov"]
-    train_targets: List[Optional[TimeSeries]] = dataset["train"]["target"]
-    val_targets: List[Optional[TimeSeries]] = dataset["val"]["target"]
-    train_covs: List[Optional[TimeSeries]] = dataset["train"]["cov"]
-    val_covs: List[Optional[TimeSeries]] = dataset["val"]["cov"]
+    def _cast_series_list(series_list):
+        casted = []
+        for ts in series_list:
+            if ts is None:
+                casted.append(None)
+            else:
+                casted.append(ts.astype(np.float32))
+        return casted
+
+    def _prepare_covariates(covs):
+        return covs if covs is not None else []
+
+    # 這裡全部都變成 float32 的 TimeSeries
+    train_targets: List[Optional[TimeSeries]] = _cast_series_list(dataset["train"]["target"])
+    val_targets: List[Optional[TimeSeries]]   = _cast_series_list(dataset["val"]["target"])
+    test_targets: List[Optional[TimeSeries]]  = _cast_series_list(dataset["test"]["target"])
+    train_covs: List[Optional[TimeSeries]] = _cast_series_list(_prepare_covariates(dataset["train"]["cov"]))
+    val_covs: List[Optional[TimeSeries]]   = _cast_series_list(_prepare_covariates(dataset["val"]["cov"]))
+    test_covs: List[Optional[TimeSeries]]  = _cast_series_list(_prepare_covariates(dataset["test"]["cov"]))
     tickers: List[str] = dataset.get("tickers", [])
 
-    model = TSMixerModel.load(args.model)
+    import torch
+    from darts.models import TSMixerModel
+
+    # 給 matmul 一點空間，不一定必要，但順手加
+    torch.set_default_dtype(torch.float32)
+    torch.set_float32_matmul_precision("high")
+
+    # model = TSMixerModel.load(args.model)
+
+    model = TSMixerModel.load(
+        args.model,
+        pl_trainer_kwargs={
+            "accelerator": "gpu",
+            "devices": [0],
+            "precision": "bf16-mixed", 
+        },
+    )
 
     results: List[Tuple[str, float, float, float, float]] = []
 
@@ -126,9 +155,9 @@ def main() -> None:
         dates = test_ts.time_index
 
         plt.figure(figsize=(10, 4))
-        plt.plot(dates, np.clip(10000*true_vals,  1e-8, None), label="True", linewidth=1.5)
-        plt.plot(dates, np.clip(10000*pred_vals,  1e-8, None), label="TSMixer", linewidth=1.2)
-        plt.plot(dates, np.clip(10000*garch_vals, 1e-8, None), label="GARCH", linewidth=1.0, linestyle="--")
+        plt.plot(dates, np.clip(true_vals,  1e-8, None), label="True", linewidth=1.5)
+        plt.plot(dates, np.clip(pred_vals,  1e-8, None), label="TSMixer", linewidth=1.2)
+        plt.plot(dates, np.clip(garch_vals, 1e-8, None), label="GARCH", linewidth=1.0, linestyle="--")
         plt.title(f"{ticker} - Test Forecasts")
         plt.xlabel("Date")
         plt.ylabel("Volatility")
@@ -140,11 +169,11 @@ def main() -> None:
         plt.savefig(plots_dir / f"{ticker}.png", dpi=150)
         plt.close()
 
-        window = 20
+        window = 5
         kernel = np.ones(window) / window
-        true_roll  = np.convolve(10000*true_vals,  kernel, mode='valid')
-        pred_roll  = np.convolve(10000*pred_vals,  kernel, mode='valid')
-        garch_roll = np.convolve(10000*garch_vals, kernel, mode='valid')
+        true_roll  = np.convolve(true_vals,  kernel, mode='valid')
+        pred_roll  = np.convolve(pred_vals,  kernel, mode='valid')
+        garch_roll = np.convolve(garch_vals, kernel, mode='valid')
         dates_roll = dates[window-1:]
 
         plt.figure(figsize=(10, 4))

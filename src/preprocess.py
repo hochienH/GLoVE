@@ -77,7 +77,8 @@ def _apply_burn_in(
 
         if alpha_cols:
             # 因為 .notna().all(axis=1) 會把所有值都轉換成True, False
-            # _first_valid_position 中的 series.notna().to_numpy() 會全部都是 True, 回傳永遠都是 0
+            # _first_valid_position 中的 series.notna().to_numpy() 會全部都是 True, 回傳永遠都是 
+            # 因此 需要重寫判斷式
             alpha_ready = group[list(alpha_cols)].notna().all(axis=1)
             true_positions = np.flatnonzero(alpha_ready.to_numpy())
             if len(true_positions) > 0:
@@ -144,6 +145,11 @@ def preprocess_data(
 
     if all_nan_cols:
         cleaned = cleaned.drop(columns=all_nan_cols)
+
+    # if target_col:
+    #     cleaned[target_col] = cleaned[target_col] * 10000
+    # if garch_col:
+    #     cleaned[garch_col] = cleaned[garch_col] * 10000
 
     cleaned = cleaned.sort_values(["code", "date"]).reset_index(drop=True)
     return cleaned, dropped

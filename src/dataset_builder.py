@@ -50,16 +50,27 @@ def _build_static_covariates(
 
     unique_industries = sorted({ind for ind in code_to_industry.values()})
     unique_codes = sorted(code_to_industry.keys())
-    static_columns: List[str] = [f"industry_{ind}" for ind in unique_industries]
-    if static_mode == "industry_ticker":
-        static_columns.extend([f"ticker_{code}" for code in unique_codes])
+
+    if static_mode == "industry":
+        static_columns = [f"industry_{ind}" for ind in unique_industries]
+    elif static_mode == "ticker":
+        static_columns = [f"ticker_{code}" for code in unique_codes]
+    else:  # industry_ticker
+        static_columns = [f"industry_{ind}" for ind in unique_industries] + [
+            f"ticker_{code}" for code in unique_codes
+        ]
 
     covariates: Dict[str, pd.DataFrame] = {}
     for code, industry in code_to_industry.items():
         vec = np.zeros((1, len(static_columns)))
-        vec[0, unique_industries.index(industry)] = 1
-        if static_mode == "industry_ticker":
-            tick_offset = len(unique_industries) + unique_codes.index(code)
+        if static_mode in {"industry", "industry_ticker"}:
+            vec[0, unique_industries.index(industry)] = 1
+        if static_mode in {"ticker", "industry_ticker"}:
+            tick_offset = (
+                unique_codes.index(code)
+                if static_mode == "ticker"
+                else len(unique_industries) + unique_codes.index(code)
+            )
             vec[0, tick_offset] = 1
         covariates[code] = pd.DataFrame(vec, columns=static_columns)
     return covariates
@@ -194,7 +205,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--static_mode",
-        choices=["industry", "industry_ticker", "none"],
+        choices=["industry", "industry_ticker", "ticker", "none"],
         default="industry_ticker",
         help="Static covariates mode.",
     )

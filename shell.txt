@@ -5,7 +5,45 @@ python src/model_predict_eval.py --data Dataset/ts_data.pkl --model models/tsmix
 
 
 python src/preprocess.py --input Dataset/data/ml_dataset_alpha101_volatility.csv --output Dataset/clean.pkl --disabled_features close log_return u_hat_90 --use_log_target --target_col var_true_90 --garch_col garch_var_90
-python src/dataset_builder.py --input Dataset/clean.pkl --output Dataset/ts_data.pkl --val_frac 0.2 --test_frac 0.1 --input_chunk_length 90 --static_mode industry_ticker --target_col var_true_90 --garch_col garch_var_90
-python src/model_train.py --data Dataset/ts_data.pkl --epochs 10 --batch_size 32 --lambda 0.01 --model_path models/tsmixer_v1.pth --log_dir logs
+python src/dataset_builder.py --input Dataset/clean.pkl --output Dataset/ts_data.pkl --val_frac 0.2 --test_frac 0.1 --input_chunk_length 90 --static_mode ticker --target_col var_true_90 --garch_col garch_var_90
+python src/model_train.py --data Dataset/ts_data.pkl --epochs 10 --batch_size 32 --lambda 0.1 --model_path models/tsmixer_v1.pth --log_dir logs
 python src/model_predict_eval.py --data Dataset/ts_data.pkl --model models/tsmixer_v1.pth --output outputs/metrics_v1.csv
 
+python src/preprocess.py `
+    --input Dataset/data/ml_dataset_alpha101_volatility.csv `
+    --output Dataset/clean.pkl `
+    --disabled_features close log_return u_hat_90 `
+    --use_log_target `
+    --target_col var_true_90 `
+    --garch_col garch_var_90 `
+
+python src/dataset_builder.py `
+    --input Dataset/clean.pkl `
+    --output Dataset/ts_data.pkl `
+    --val_frac 0.2 `
+    --test_frac 0.1 `
+    --input_chunk_length 90 `
+    --static_mode ticker `
+    --target_col var_true_90 `
+    --garch_col garch_var_90 `
+
+# 訓練模型，自訂部分超參數
+python src/model_train.py `
+    --data Dataset/ts_data.pkl `
+    --lambda 0 `
+    --epochs 2 `
+    --lr 3e-4 `
+    --lr_scheduler exponential `
+    --lr_gamma 0.99 `
+    --grad_clip 0.5 `
+    --hidden_size 32 `
+    --ff_size 64 `
+    --num_blocks 4 `
+    --dropout 0.1 `
+    --model_path models/tsmixer.pth
+
+# 評估模型
+python src/model_predict_eval.py `
+    --data Dataset/ts_data.pkl `
+    --model models/tsmixer.pth `
+    --output outputs/metrics.csv
