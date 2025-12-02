@@ -1,0 +1,226 @@
+import argparse
+import csv
+import pathlib
+import pickle
+from typing import List, Optional, Sequence, Tuple
+
+import numpy as np
+import torch
+from darts import TimeSeries
+from darts.models import RNNModel
+
+# Ensure WeightedLoss is registered for model deserialization.
+from model_train_lstm import WeightedLoss  # noqa: F401
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Evaluate trained LSTM (RNNModel) on validation/test splits.")
+    parser.add_argument("--data", required=True, help="dataset_builder.py 輸出的資料集 pickle 路徑。")
+    parser.add_argument("--model", required=True, help="LSTM 訓練後儲存的 .pth 模型。")
+    parser.add_argument(
+        "--split",
+        choices=["val", "test"],
+        default="test",
+        help="要評估的資料切分；預設使用 test。",
+    )
+    parser.add_argument(
+        "--forecast_horizon",
+        type=int,
+        default=1,
+        help="historical_forecasts 的 horizon（預設 1 代表逐日滾動預測）。",
+    )
+    parser.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help="historical_forecasts 的 stride。",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="若提供則把 MAE/RMSE 指標輸出成 CSV。",
+    )
+    parser.add_argument(
+        "--use_log_target",
+        action="store_true",
+        help="若訓練時 target 做過 log1p，推論後會自動 expm1 還原。",
+    )
+    parser.add_argument(
+        "--save_plots",
+        action="store_true",
+        help="啟用後輸出預測 vs. 實際/GARCH 的折線圖與 rolling mean 圖。",
+    )
+    return parser.parse_args()
+
+
+def _cast_series_list(series_list: Sequence[Optional[TimeSeries]]) -> List[Optional[TimeSeries]]:
+    casted: List[Optional[TimeSeries]] = []
+    for ts in series_list:
+        if ts is None:
+            casted.append(None)
+        else:
+            casted.append(ts.astype(np.float32))
+    return casted
+
+
+def _concat_series(parts: Sequence[Optional[TimeSeries]]) -> Optional[TimeSeries]:
+    combined: Optional[TimeSeries] = None
+    for ts in parts:
+        if ts is None:
+            continue
+        combined = ts if combined is None else combined.append(ts)
+    return combined
+
+
+def _invert_log(values: np.ndarray, use_log_target: bool) -> np.ndarray:
+    return np.expm1(values) if use_log_target else values
+
+
+def _detect_accelerator() -> Tuple[str, object]:
+    if torch.cuda.is_available():
+        return "gpu", "auto"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps", "auto"
+    return "cpu", 1
+
+
+def main() -> None:
+    args = parse_args()
+    with open(args.data, "rb") as f:
+        dataset = pickle.load(f)
+
+    train_targets = _cast_series_list(dataset["train"]["target"])
+    val_targets = _cast_series_list(dataset["val"]["target"])
+    test_targets = _cast_series_list(dataset["test"]["target"])
+    train_covs = _cast_series_list(dataset["train"]["cov"])
+    val_covs = _cast_series_list(dataset["val"]["cov"])
+    test_covs = _cast_series_list(dataset["test"]["cov"])
+    tickers: List[str] = dataset.get("tickers", [])
+
+    accelerator, devices = _detect_accelerator()
+
+    load_kwargs = {
+        "pl_trainer_kwargs": {
+            "accelerator": accelerator,
+            "devices": devices,
+            "enable_progress_bar": False,
+        }
+    }
+    model = RNNModel.load(args.model, **load_kwargs)
+
+    if args.save_plots:
+        plots_dir = pathlib.Path("outputs/lstm_plots")
+        rolling_dir = pathlib.Path("outputs/lstm_plots_rolling")
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        rolling_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        plots_dir = rolling_dir = None
+
+    if args.split == "val":
+        eval_targets = val_targets
+        eval_covs = val_covs
+        history_builder = lambda idx: _concat_series([train_targets[idx], val_targets[idx]])
+        cov_builder = lambda idx: _concat_series([train_covs[idx], val_covs[idx]])
+    else:
+        eval_targets = test_targets
+        eval_covs = test_covs
+        history_builder = lambda idx: _concat_series([train_targets[idx], val_targets[idx], test_targets[idx]])
+        cov_builder = lambda idx: _concat_series([train_covs[idx], val_covs[idx], test_covs[idx]])
+
+    metrics: List[Tuple[str, float, float, float, float]] = []
+
+    for idx, eval_ts in enumerate(eval_targets):
+        if eval_ts is None or len(eval_ts) == 0:
+            continue
+        ticker = tickers[idx] if idx < len(tickers) else f"Series_{idx}"
+
+        history_series = history_builder(idx)
+        history_covariates = cov_builder(idx)
+        if history_series is None:
+            print(f"[警告] {ticker} 缺少歷史資料，跳過。")
+            continue
+
+        start_time = eval_ts.start_time()
+        preds = model.historical_forecasts(
+            series=history_series,
+            future_covariates=history_covariates,
+            start=start_time,
+            forecast_horizon=args.forecast_horizon,
+            stride=args.stride,
+            retrain=False,
+            verbose=False,
+            last_points_only=True,
+        )
+
+        pred_vals = preds.to_dataframe().iloc[:, 0].to_numpy()
+        truth_df = eval_ts.to_dataframe()
+        true_vals = truth_df.iloc[:, 0].to_numpy()
+        garch_vals = truth_df.iloc[:, 1].to_numpy()
+
+        pred_vals = _invert_log(pred_vals, args.use_log_target)
+        true_vals = _invert_log(true_vals, args.use_log_target)
+        garch_vals = _invert_log(garch_vals, args.use_log_target)
+
+        mae_model = float(np.mean(np.abs(pred_vals - true_vals)))
+        rmse_model = float(np.sqrt(np.mean((pred_vals - true_vals) ** 2)))
+        mae_garch = float(np.mean(np.abs(garch_vals - true_vals)))
+        rmse_garch = float(np.sqrt(np.mean((garch_vals - true_vals) ** 2)))
+
+        metrics.append((ticker, mae_model, rmse_model, mae_garch, rmse_garch))
+        print(
+            f"{ticker}: MAE_LSTM={mae_model:.6f}, RMSE_LSTM={rmse_model:.6f}, "
+            f"MAE_GARCH={mae_garch:.6f}, RMSE_GARCH={rmse_garch:.6f}"
+        )
+
+        if args.save_plots:
+            import matplotlib.pyplot as plt  # noqa: PLC0415
+
+            dates = eval_ts.time_index
+            plt.figure(figsize=(10, 4))
+            plt.plot(dates, np.clip(true_vals, 1e-8, None), label="True", linewidth=1.5)
+            plt.plot(dates, np.clip(pred_vals, 1e-8, None), label="LSTM", linewidth=1.2)
+            plt.plot(dates, np.clip(garch_vals, 1e-8, None), label="GARCH", linewidth=1.0, linestyle="--")
+            plt.title(f"{ticker} - {args.split.upper()} Forecasts")
+            plt.xlabel("Date")
+            plt.ylabel("Volatility")
+            plt.yscale("log", base=10)
+            plt.ylim(1e-2, 1e2)
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(plots_dir / f"{ticker}.png", dpi=150)
+            plt.close()
+
+            window = 5
+            kernel = np.ones(window) / window
+            true_roll = np.convolve(true_vals, kernel, mode="valid")
+            pred_roll = np.convolve(pred_vals, kernel, mode="valid")
+            garch_roll = np.convolve(garch_vals, kernel, mode="valid")
+            dates_roll = dates[window - 1 :]
+
+            plt.figure(figsize=(10, 4))
+            plt.plot(dates_roll, np.clip(true_roll, 1e-8, None), label="True", linewidth=1.5)
+            plt.plot(dates_roll, np.clip(pred_roll, 1e-8, None), label="LSTM", linewidth=1.2)
+            plt.plot(dates_roll, np.clip(garch_roll, 1e-8, None), label="GARCH", linewidth=1.0, linestyle="--")
+            plt.title(f"{ticker} - Rolling Mean ({args.split.upper()})")
+            plt.xlabel("Date")
+            plt.ylabel("Volatility")
+            plt.yscale("log", base=10)
+            plt.ylim(1e-2, 1e2)
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(rolling_dir / f"{ticker}.png", dpi=150)
+            plt.close()
+
+    if args.output:
+        output_path = pathlib.Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["code", "MAE_LSTM", "RMSE_LSTM", "MAE_GARCH", "RMSE_GARCH"])
+            writer.writerows(metrics)
+        print(f"指標已輸出至 {output_path}")
+
+
+if __name__ == "__main__":
+    main()
+
