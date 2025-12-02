@@ -21,7 +21,7 @@ python src/dataset_builder.py --input Dataset_reenact_yuchi/clean.pkl  --output 
 
 4. 訓練模型，自訂部分超參數 (1447-1451 一個iter 100秒)
 
-python src/model_train.py     --data Dataset_reenact_yuchi/ts_data.pkl --lambda 0 --epochs 2 --lr 2e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --ff_size 64 --num_blocks 4 --dropout 0.1 --model_path models/tsmixer_lambda0.pth
+python src/model_train.py     --data Dataset_reenact_yuchi/ts_data.pkl --lambda 0 --epochs 2 --lr 3e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --ff_size 64 --num_blocks 4 --dropout 0.1 --model_path models/tsmixer_lambda0.pth
 
 if using lstm：有自己的train跟prediction code
 
@@ -29,7 +29,7 @@ python src/model_train_lstm.py     --data Dataset_reenact_yuchi/ts_data.pkl --la
 
 原始的方法如果只用cpi要跑8小時1個epoch我叫gpt幫我生成mac晶片加速跟gpu加速： 結果光是用電腦內建的mac晶片就可以壓到10分鐘內一個epoch
 
-5. 輸出結果 python src/model_predict_eval.py --data Dataset_reenact_yuchi/ts_data.pkl --model models/tsmixer_lambda0_iter10.pth --output outputs/lamb0-iter10/metrics_tsmixer_lambda0.csv
+5. 輸出結果 python src/model_predict_eval.py --data Dataset_reenact_yuchi/ts_data.pkl --model models/tsmixer_lambda0_reviselr.pth --output outputs/lamb0-iter2-new/metrics_tsmixer_lambda0.csv
 
 
 or lstm prediction
@@ -45,11 +45,11 @@ python src/data_visualization.py \
   --output outputs/lstm\ lamb\ 0/lstm_metrics_ver1_iter10.png
 
 python src/data_visualization.py \
-  --input outputs/lamb0-iter10/metrics_tsmixer_lambda0.csv \
-  --output outputs/lamb0-iter10/metrics_tsmixer_lambda0.png
+  --input outputs/lamb0-iter2-new/metrics_tsmixer_lambda0.csv \
+  --output outputs/lamb0-iter2-new/metrics_tsmixer_lambda0.png
 
 以下是每次比較的資料結果
-Lambda = 0, garch+tsmixer:
+Lambda = 0, garch+tsmixer, epoch=2, lr=2e-4:
 --- Average Metrics ---
 |            |   Average Value |
 |:-----------|----------------:|
@@ -66,6 +66,8 @@ Lambda = 0, garch+tsmixer:
 
 (.venv) blackwingedkite@keyouqideMacBook-Air ADL-Final % python src/data_visualization.py --input outputs/lamb0-iter10/metrics_tsmixer_lambda0.csv
 
+
+Lambda = 0, garch+tsmixer, epoch=10, lr=3e-4
 --- Average Metrics ---
 |            |   Average Value |
 |:-----------|----------------:|
@@ -80,7 +82,7 @@ Lambda = 0, garch+tsmixer:
 | MAE      |           34 |           12 |      0 |
 | RMSE     |           40 |            6 |      0 |
 
-lstm
+Lambda = 0, lstm+garch, epoch=10, lr=3e-4
 --- Average Metrics ---
 | Metric   | Method   |   Average Value |
 |:---------|:---------|----------------:|
@@ -94,6 +96,23 @@ lstm
 |:---------|-------------:|-------------:|-------:|
 | MAE      |           45 |            1 |      0 |
 | RMSE     |           45 |            1 |      0 |
+
+Lambda = 0, tsmixer+garch, epoch=2, lr=3e-4
+--- Average Metrics ---
+| Metric   | Method   |   Average Value |
+|:---------|:---------|----------------:|
+| MAE      | model    |        0.802012 |
+| MAE      | garch    |        0.827502 |
+| RMSE     | model    |        0.967023 |
+| RMSE     | garch    |        1.00899  |
+
+--- Win Counts (Lower error is a win) ---
+| Metric   |   Model Wins |   GARCH Wins |   Ties |
+|:---------|-------------:|-------------:|-------:|
+| MAE      |           36 |           10 |      0 |
+| RMSE     |           41 |            5 |      0 |
+
+Lambda = 0, lstm+tsmixer, epoch=2, lr=3e-4
 
 FAQ:
 model在哪裡？
