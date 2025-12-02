@@ -1,0 +1,33 @@
+dropout: 0.2
+hidden_dim: 256
+input_chunk_length: 90
+input_size: 169
+likelihood: null
+lr_scheduler_cls: !!python/name:torch.optim.lr_scheduler.ExponentialLR ''
+lr_scheduler_kwargs:
+  gamma: 0.99
+name: LSTM
+nr_params: 1
+num_layers: 3
+optimizer_cls: !!python/name:torch.optim.adamw.AdamW ''
+optimizer_kwargs:
+  lr: 0.0003
+output_chunk_length: 1
+output_chunk_shift: 0
+target_size: 2
+train_sample_shape:
+- !!python/tuple
+  - 90
+  - 2
+- null
+- !!python/tuple
+  - 90
+  - 167
+- !!python/tuple
+  - 90
+  - 167
+- null
+- !!python/tuple
+  - 90
+  - 2
+use_reversible_instance_norm: false

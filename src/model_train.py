@@ -205,8 +205,19 @@ def main() -> None:
     input_chunk_length = args.input_chunk_length or dataset.get("input_chunk_length", 90)
     use_static = dataset.get("static_mode", "none") != "none"
 
-    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
-    devices = 1 if accelerator == "cpu" else "auto"
+    # 裝置自動偵測：
+    # - 若有 CUDA，使用 GPU
+    # - 否則若有 Apple Silicon MPS，使用 MPS
+    # - 以上皆無則退回 CPU
+    if torch.cuda.is_available():
+        accelerator = "gpu"
+        devices = "auto"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        accelerator = "mps"
+        devices = "auto"
+    else:
+        accelerator = "cpu"
+        devices = 1
 
     # Configure learning rate scheduler if requested. ExponentialLR gradually
     # reduces the learning rate during training, which can help convergence

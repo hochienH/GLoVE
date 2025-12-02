@@ -8,3 +8,6 @@ trained_model
 .venv
 *.venv
 Dataset
+Old_Dataset
+models
+Dataset_reenact_yuchi

@@ -1,0 +1,58 @@
+TSMixer + GARCH 的結合方式  
+- `TSMixerModel` 仍是 Darts 內建的 mixer 架構，但輸出只預測一條波動度序列。真正把 GARCH 資訊納入的是自定義的 `WeightedLoss`。訓練資料中的 `target` 每個 timestamp 都含兩個通道：`[...,0]` 是實際年化波動或 realized variance，`[...,1]` 是事先用 GARCH(推測在 `dataset_builder.py` 計算)得到的波動。  
+- `WeightedLoss(pred, target)` 會把 TSMixer 的輸出 `pred_vol` 同時與 `true_vol`、`garch_vol` 做 MSE，再用 `lambda_weight` 做凸組合：  
+```
+11:28:src/model_train.py
+class WeightedLoss(nn.Module):
+    ...
+    def forward(...):
+        ...
+        loss_true = self.mse(pred_vol, true_vol)
+        loss_garch = self.mse(pred_vol, garch_vol)
+        return self.lambda_weight * loss_true + (1 - self.lambda_weight) * loss_garch
+```
+- 因為 `lambda_weight` 預設 0.01，所以模型主要對齊 GARCH 曲線 (0.99 權重)，但仍保留一點對實際波動的校正。TSMixer 學習到的表示本質上是「介於真實波動與 GARCH 推估之間的折衷」，讓多支股票（46 支）共享特徵抽取能力。
+
+可考慮的替代／補充模型  
+- **LSTM/Seq2Seq**：可行，尤其若你想直接加入更長期記憶或多層堆疊。缺點是計算量大且長序列梯度衰減，需要配合 attention 或 skip connections。  
+- **DeepAR**：很適合多商品共享參數的情境，可把 GARCH 輸出當成額外 covariate 或 loss term，同時建模條件機率分佈（高波動時能給出更寬的區間）。  
+- **N-BEATS / N-HiTS**：對週期性與趨勢表達靈活，對金融時間序列的回測常有不錯表現，也容易加自訂 loss。  
+- **Temporal Fusion Transformer / TFT**：若想同時吃進大量結構化 covariates（宏觀指標、分類特徵），TFT 的 gating + attention 很適合，可把 GARCH 結果當 static covariate 或 auxiliary decoder loss。  
+- **PatchTST / TimesNet**：針對長序列表現優秀，近年在 M4/ETT 等基準勝率高，能處理跨股票的長期模式。  
+- **高斯過程/核方法**：若樣本不算大，可用 GP 或 Bayesian regression 將 GARCH 作為 mean function，再用 kernel 捕捉殘差結構。
+
+實作建議  
+- 若轉到 LSTM/DeepAR，可沿用現有資料管線，只需改成 Darts 的 `RNNModel` / `DeepARModel` 並把 `WeightedLoss` 以 `TorchForecastingModel` 自訂；lambda 權重概念仍可重用。  
+- 可做小型 ablation：固定資料與 loss，對 TSMixer、LSTM、DeepAR 做交叉驗證，看哪一種在 out-of-sample 波動預測 (比如 RMSE、QLIKE) 最佳。  
+- 若要結合 GARCH，更進階作法是把 GARCH 參數當成先驗或輸入特徵，或在 loss 中加入 realized volatility vs. GARCH 的加權對數似然。
+
+lstm實踐
+你可以寫一個新的code使用dart裡面的模型，用同樣的weight loss邏輯把tsmixer換成lstm
+[5 tools called]
+
+## LSTM 訓練腳本
+- 新增 `src/model_train_lstm.py`，複用 `WeightedLoss` 讓 LSTM 預測的波動同時貼近真實值與 GARCH 曲線，權重仍由 `--lambda` 控制。  
+```12:29:src/model_train_lstm.py
+class WeightedLoss(nn.Module):
+    ...
+    return self.lambda_weight * loss_true + (1 - self.lambda_weight) * loss_garch
+```
+- 透過 `argparse` 暴露資料路徑、輸入長度、LSTM 深度與 AdamW/ExponentialLR 等超參，保持與原 TSMixer 腳本一致的訓練流程與前處理。  
+```31:123:src/model_train_lstm.py
+def parse_args() -> argparse.Namespace:
+    ...
+    parser.add_argument("--hidden_size", type=int, default=256, ...)
+```
+- 以 Darts `RNNModel(model="LSTM")` 取代 `TSMixerModel`，設定 3 層、hidden 256、dropout 0.2，繼續使用相同的 covariates、EarlyStopping、bf16 mixed precision 以及 dataloader 參數，並儲存為 `models/lstm.pth`。  
+```196:233:src/model_train_lstm.py
+model = RNNModel(
+    model="LSTM",
+    input_chunk_length=input_chunk_length,
+    ...
+    optimizer_cls=torch.optim.AdamW,
+)
+```
+
+## 建議後續
+- 執行 `python src/model_train_lstm.py --data <你的資料>` 驗證可否正常收斂，再與原 TSMixer 在相同 validation split 上比較 RMSE / QLIKE。
+- 若要貼近論文中的後段 MLP/BatchNorm，可進一步改寫為自訂 `TorchForecastingModel` 模組，把 `RNNModel` 的輸出接兩層線性層與 BN/ ReLU。

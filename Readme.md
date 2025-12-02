@@ -1,0 +1,62 @@
+# How to reenact the result and further comparison
+0. source .venv/bin/activate
+0-1. new requirements is built by pipreqs to further allocate pip dependency.
+pip install pipreqs
+pipreqs ./src
+資料集我不提供到github上因為太大了
+
+1. download newest dataset from here https://drive.google.com/file/d/1frxoWoAjVa2BGc_VW5ShEElYodYnDd1R/view
+1-1. I have renamed it to Dataset_reenact_yuchi to make it different and reconogizable
+2. run following code to complete data preprocessing(14:38-14:41)
+python src/preprocess.py     --input Dataset_reenact_yuchi/data/ml_dataset_alpha101_volatility.csv     --output Dataset_reenact_yuchi/clean.pkl     --disabled_features close log_return u_hat_90     --use_log_target     --target_col var_true_90     --garch_col garch_var_90 
+2-1. final dataset is in clean.pkl
+3. build dataset (30 secs)
+python src/dataset_builder.py --input Dataset_reenact_yuchi/clean.pkl  --output Dataset_reenact_yuchi/ts_data.pkl --val_frac 0.2 --test_frac 0.1 --input_chunk_length 90 --static_mode ticker --target_col var_true_90 --garch_col garch_var_90 
+4. # 訓練模型，自訂部分超參數 (1447-1451 一個iter 100秒)
+python src/model_train.py     --data Dataset_reenact_yuchi/ts_data.pkl --lambda 0 --epochs 2 --lr 2e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --ff_size 64 --num_blocks 4 --dropout 0.1 --model_path models/tsmixer_lambda0.pth
+
+if using lstm
+python src/model_train_lstm.py     --data Dataset_reenact_yuchi/ts_data.pkl --lambda 0 --epochs 10 --lr 2e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --dropout 0.1 --model_path models/lstm_lambda0.pth
+原始的方法如果只用cpi要跑8小時1個epoch我叫gpt幫我生成mac晶片加速跟gpu加速： 結果光是用電腦內建的mac晶片就可以壓到10分鐘內一個epoch
+python src/model_train_lstm.py --data Dataset_reenact_yuchi/ts_data.pkl --lambda 0.01
+
+5. 輸出結果 python src/model_predict_eval.py --data Dataset_reenact_yuchi/ts_data.pkl --model models/tsmixer_lambda0_iter10.pth --output outputs/lamb0-iter10/metrics_tsmixer_lambda0.csv
+6. 資料視覺化和資訊整理 
+python src/data_visualization.py --input outputs/lamb0-iter10/metrics_tsmixer_lambda0.csv
+
+以下是每次比較的資料結果
+Lambda = 0, garch+tsmixer:
+--- Average Metrics ---
+|            |   Average Value |
+|:-----------|----------------:|
+| MAE_model  |        0.818576 |
+| RMSE_model |        0.981375 |
+| MAE_garch  |        0.827502 |
+| RMSE_garch |        1.00899  |
+
+--- Win Counts (Lower error is a win) ---
+| Metric   |   Model Wins |   GARCH Wins |   Ties |
+|:---------|-------------:|-------------:|-------:|
+| MAE      |           27 |           19 |      0 |
+| RMSE     |           39 |            7 |      0 |
+
+(.venv) blackwingedkite@keyouqideMacBook-Air ADL-Final % python src/data_visualization.py --input outputs/lamb0-iter10/metrics_tsmixer_lambda0.csv
+
+--- Average Metrics ---
+|            |   Average Value |
+|:-----------|----------------:|
+| MAE_model  |        0.808775 |
+| RMSE_model |        0.97595  |
+| MAE_garch  |        0.827502 |
+| RMSE_garch |        1.00899  |
+
+--- Win Counts (Lower error is a win) ---
+| Metric   |   Model Wins |   GARCH Wins |   Ties |
+|:---------|-------------:|-------------:|-------:|
+| MAE      |           34 |           12 |      0 |
+| RMSE     |           40 |            6 |      0 |
+
+
+FAQ:
+model在哪裡？
+->可以自己訓練或者跟我要我上傳雲端 因為有點多
