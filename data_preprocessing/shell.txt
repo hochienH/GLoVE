@@ -1,5 +1,3 @@
-cd C:\Users\xjp91\OneDrive\桌面\ADL\ADL-Final\Dataset
-
 python src\pipelines\run_alpha101_from_ohlc.py 
 python src\feature_engineering\volatility_labels_features.py
 python src\feature_engineering\merge_alpha_volatility.py
