@@ -21,15 +21,16 @@ python src/dataset_builder.py --input Dataset_reenact_yuchi/clean.pkl  --output 
 
 4. 訓練模型，自訂部分超參數 (1447-1451 一個iter 100秒)
 
-python src/model_train.py     --data Dataset_reenact_yuchi/ts_data.pkl --lambda 0 --epochs 2 --lr 3e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --ff_size 64 --num_blocks 4 --dropout 0.1 --model_path models/tsmixer_lambda0.pth
+python src/model_train.py     --data Dataset_reenact_yuchi/ts_data.pkl --lambda 0 --epochs 6 --lr 3e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --ff_size 64 --num_blocks 4 --dropout 0.1 --model_path models/tsmixer_lambda0.pth
 
 if using lstm：有自己的train跟prediction code
 
-python src/model_train_lstm.py     --data Dataset_reenact_yuchi/ts_data.pkl --lambda 0 --epochs 10 --lr 2e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --dropout 0.1 --model_path models/lstm_lambda0.pth
+python src/model_train_lstm.py     --data Dataset_reenact_yuchi/ts_data.pkl --lambda 0 --epochs 6 --lr 2e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --dropout 0.1 
 
+### 如果用bash:使用train_all_lambda.sh  --model_path models/lstm_lambda0.pth  --parallel 4 --nohub
 原始的方法如果只用cpi要跑8小時1個epoch我叫gpt幫我生成mac晶片加速跟gpu加速： 結果光是用電腦內建的mac晶片就可以壓到10分鐘內一個epoch
 
-5. 輸出結果 python src/model_predict_eval.py --data Dataset_reenact_yuchi/ts_data.pkl --model models/tsmixer_lambda0_reviselr.pth --output outputs/lamb0-iter2-new/metrics_tsmixer_lambda0.csv
+5. 輸出結果 python src/model_predict_eval.py --data Dataset_reenact_yuchi/ts_data.pkl --model models/tsmixer_lambda0_reviselr.pth --output outputs/lambda_0_1/
 
 
 or lstm prediction
@@ -37,17 +38,34 @@ python src/predict_lstm.py \
   --data Dataset_reenact_yuchi/ts_data.pkl \
   --model models/lstm.pth \
   --split test \
-  --output outputs/lstm_metrics_ver1_iter10.csv \
+  --output outputs/lambda_0_1
   --save_plots
+
+### 如果用bash:使用./eval_all_lambdas.sh --parallel 4
 6. 資料視覺化和資訊整理 
 python src/data_visualization.py \
-  --input outputs/lstm\ lamb\ 0/lstm_metrics_ver1_iter10.csv \
-  --output outputs/lstm\ lamb\ 0/lstm_metrics_ver1_iter10.png
-
+  --input outputs/lambda_0_1/metrics.csv \
+  --input outputs/lambda_0_1/metrics.png \
 python src/data_visualization.py \
   --input outputs/lamb0-iter2-new/metrics_tsmixer_lambda0.csv \
   --output outputs/lamb0-iter2-new/metrics_tsmixer_lambda0.png
 
+
+如何使用自動測試最佳化的腳本？ ＊我有使用平行化加速、背景處理、nohup
+./train_all_lambdas.sh --parallel 4 --nohup
+./train_all_lambdas.sh --parallel 4 --log-dir my_logs
+監控訓練進度
+# 查看日誌檔案
+tail -f logs/tsmixer_lambda0.log
+
+# 查看所有模型檔案
+ls -lh models/
+
+# 查看執行中的 Python 進程
+ps aux | grep python
+
+7. 用compare_all_model.py來看到底誰更好
+python src/compare_all_model.py --input outputs/all_metrics_combined.csv 
 以下是每次比較的資料結果
 Lambda = 0, garch+tsmixer, epoch=2, lr=2e-4:
 --- Average Metrics ---

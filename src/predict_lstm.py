@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         default=None,
-        help="若提供則把 MAE/RMSE 指標輸出成 CSV。",
+        help="輸出csv跟圖片的資料夾",
     )
     parser.add_argument(
         "--use_log_target",
@@ -109,8 +109,10 @@ def main() -> None:
     model = RNNModel.load(args.model, **load_kwargs)
 
     if args.save_plots:
-        plots_dir = pathlib.Path("outputs/lstm_plots")
-        rolling_dir = pathlib.Path("outputs/lstm_plots_rolling")
+        dir_path = pathlib.Path(args.output)
+        dir_path.mkdir(parents=True, exist_ok=True)
+        plots_dir = pathlib.Path(args.output) / "plots"
+        rolling_dir = pathlib.Path(args.output) / "rolling_plots"
         plots_dir.mkdir(parents=True, exist_ok=True)
         rolling_dir.mkdir(parents=True, exist_ok=True)
     else:
@@ -212,7 +214,7 @@ def main() -> None:
             plt.close()
 
     if args.output:
-        output_path = pathlib.Path(args.output)
+        output_path = pathlib.Path(args.output) / "metrics.csv"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)

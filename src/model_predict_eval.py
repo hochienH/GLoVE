@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate trained TSMixer on the test split.")
     parser.add_argument("--data", required=True, help="Path to dataset pickle from dataset_builder.py")
     parser.add_argument("--model", required=True, help="Path to trained model (.pth)")
-    parser.add_argument("--output", default=None, help="Optional CSV path for metrics.")
+    parser.add_argument("--output", default=None, help="outputs for images and csv.")
     parser.add_argument(
         "--use_log_target",
         action="store_true",
@@ -103,10 +103,11 @@ def main() -> None:
     )
 
     results: List[Tuple[str, float, float, float, float]] = []
-
-    plots_dir = pathlib.Path("outputs/plots")
+    dir_path = pathlib.Path(args.output)
+    dir_path.mkdir(parents=True, exist_ok=True)
+    plots_dir = pathlib.Path(args.output) / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
-    rolling_plots_dir = pathlib.Path("outputs/rolling_plots")
+    rolling_plots_dir = pathlib.Path(args.output) / "rolling_plots"
     rolling_plots_dir.mkdir(parents=True, exist_ok=True)
 
     for idx, test_ts in enumerate(test_targets):
@@ -193,7 +194,7 @@ def main() -> None:
 
 
     if args.output:
-        output_path = pathlib.Path(args.output)
+        output_path = pathlib.Path(args.output) / "metrics.csv"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
