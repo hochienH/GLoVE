@@ -5,7 +5,7 @@ pip install pipreqs
 pipreqs ./src
 資料集我不提供到github上因為太大了
 
-1. download newest dataset from here https://drive.google.com/file/d/1frxoWoAjVa2BGc_VW5ShEElYodYnDd1R/view
+1. download newest dataset from **Releases**
 
 1-1. I have renamed it to Dataset_reenact_yuchi to make it different and reconogizable
 
