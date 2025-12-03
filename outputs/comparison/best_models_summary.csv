@@ -1,3 +1,0 @@
-model_type,best_lambda_mae,best_mae,best_lambda_rmse,best_rmse
-lstm,1.0,0.34068184119203815,0.95,0.4945891454167988
-tsmixer,1.0,0.6766389883730722,0.9,0.8668113927478376

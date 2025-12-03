@@ -41,7 +41,7 @@ python src/predict_lstm.py \
   --output outputs/lambda_0_1
   --save_plots
 
-### 如果用bash:使用./eval_all_lambdas.sh --parallel 4
+### 如果用bash:使用 ./eval_all_lambdas.sh --parallel 4
 6. 資料視覺化和資訊整理 
 python src/data_visualization.py \
   --input outputs/lambda_0_1/metrics.csv \
