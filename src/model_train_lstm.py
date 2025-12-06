@@ -225,6 +225,11 @@ def main() -> None:
     except Exception:
         callbacks = [early_stopper]
 
+    if accelerator == "cpu":
+        precision = 32
+    else:
+        precision = "bf16-mixed"
+
     pl_trainer_kwargs = {
         "accelerator": accelerator,
         "devices": devices,
@@ -233,7 +238,7 @@ def main() -> None:
         "callbacks": callbacks,
         "gradient_clip_val": args.grad_clip,
         "max_epochs": args.epochs,
-        "precision": "bf16-mixed",
+        "precision": precision,
     }
 
     model = RNNModel(

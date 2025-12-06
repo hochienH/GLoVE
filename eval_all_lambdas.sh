@@ -9,8 +9,8 @@
 #   3. 最後彙整所有結果為一個總表 CSV：outputs/all_metrics_combined.csv
 #
 # 前置假設：
-#   - TSMixer 模型位於：models/tsmixer_test/tsmixer_lambda*.pth
-#   - LSTM   模型位於：models/lstm_test/lstm_lambda*.pth
+#   - TSMixer 模型位於：models/tsmixer_lambda*.pth
+#   - LSTM   模型位於：models/lstm_lambda*.pth
 #   - 評估程式：
 #       * TSMixer: python src/model_predict_eval.py
 #       * LSTM   : python src/predict_lstm.py
@@ -61,8 +61,8 @@ done
 
 # -------------------- 基本設定 --------------------
 DATA_PATH="Dataset_reenact_yuchi/ts_data.pkl"
-TSMIXER_DIR="models/tsmixer_test"
-LSTM_DIR="models/lstm_test"
+TSMIXER_DIR="models/"
+LSTM_DIR="models/"
 OUTPUT_ROOT="outputs"
 
 # 要跑的 lambda 值（需與你訓練時一致）
@@ -189,6 +189,7 @@ if [[ ${PARALLEL_JOBS} -le 1 ]]; then
     done
 else
     # 簡單的背景平行排程
+    PIDS=()
     declare -a PIDS
     t_total=${#TASKS[@]}
     next_task=0

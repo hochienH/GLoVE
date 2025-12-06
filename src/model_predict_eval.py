@@ -5,6 +5,7 @@ import pickle
 from typing import List, Optional, Tuple
 
 import numpy as np
+import torch
 from darts import TimeSeries
 from darts.models import TSMixerModel
 
@@ -16,11 +17,17 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate trained TSMixer on the test split.")
     parser.add_argument("--data", required=True, help="Path to dataset pickle from dataset_builder.py")
     parser.add_argument("--model", required=True, help="Path to trained model (.pth)")
-    parser.add_argument("--output", default=None, help="Optional CSV path for metrics.")
+    parser.add_argument("--output", default=None, help="Optional folder path for metrics.")
     parser.add_argument(
         "--use_log_target",
         action="store_true",
         help="Set if training used log1p targets (applies expm1 to predictions).",
+    )
+    parser.add_argument(
+        "--covariate_mode",
+        choices=["none", "lagged"],
+        default="none",
+        help="要不要使用協變數。預設 none（不使用alpha及營收資料）"
     )
     return parser.parse_args()
 
@@ -104,12 +111,25 @@ def main() -> None:
 
     # model = TSMixerModel.load(args.model)
 
+    if torch.cuda.is_available():
+        accelerator = "gpu"
+        devices = [0]
+        precision = "bf16-mixed"   # 有 GPU 再用混合精度
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        accelerator = "mps"
+        devices = 1
+        precision = "bf16-mixed"
+    else:
+        accelerator = "cpu"
+        devices = 1
+        precision = 32
+
     model = TSMixerModel.load(
         args.model,
         pl_trainer_kwargs={
-            "accelerator": "gpu",
-            "devices": [0],
-            "precision": "bf16-mixed", 
+            "accelerator": accelerator,
+            "devices": devices,
+            "precision": precision,
         },
     )
 
@@ -126,7 +146,11 @@ def main() -> None:
         ticker = tickers[idx] if idx < len(tickers) else f"Series_{idx}"
 
         history_series = _combine_segments(train_targets, val_targets, test_ts, idx)
-        history_covariates = _combine_covariates(train_covs, val_covs, test_covs[idx], idx)
+
+        if args.covariate_mode == "lagged":
+            history_covariates = _combine_covariates(train_covs, val_covs, test_covs[idx], idx)
+        else:
+            history_covariates = None
 
         start_time = test_ts.start_time()
         preds = model.historical_forecasts(
@@ -213,7 +237,7 @@ def main() -> None:
 
 
     if args.output:
-        output_path = pathlib.Path(args.output)
+        output_path = pathlib.Path(args.output) / "metrics.csv"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
