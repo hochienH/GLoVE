@@ -85,7 +85,7 @@ def main() -> None:
     tickers: List[str] = dataset.get("tickers", [])
 
     import torch
-    from darts.models import TSMixerModel
+    from darts.models import TFTModel
 
     # 給 matmul 一點空間，不一定必要，但順手加
     torch.set_default_dtype(torch.float32)
@@ -93,7 +93,7 @@ def main() -> None:
 
     # model = TSMixerModel.load(args.model)
 
-    model = TSMixerModel.load(
+    model = TFTModel.load(
         args.model,
         pl_trainer_kwargs={
             "accelerator": "gpu",
@@ -104,9 +104,9 @@ def main() -> None:
 
     results: List[Tuple[str, float, float, float, float]] = []
 
-    plots_dir = pathlib.Path("outputs/plots")
+    plots_dir = pathlib.Path("outputs/plots_tft")
     plots_dir.mkdir(parents=True, exist_ok=True)
-    rolling_plots_dir = pathlib.Path("outputs/rolling_plots")
+    rolling_plots_dir = pathlib.Path("outputs/rolling_plots_tft")
     rolling_plots_dir.mkdir(parents=True, exist_ok=True)
 
     for idx, test_ts in enumerate(test_targets):
@@ -127,7 +127,6 @@ def main() -> None:
             retrain=False,
             verbose=False,
             last_points_only=True,
-            # predict_kwargs={"dataloader_kwargs": {"num_workers": 1, "persistent_workers":True}}
         )
 
         pred_vals = preds.to_dataframe().iloc[:, 0].to_numpy()
@@ -157,7 +156,7 @@ def main() -> None:
 
         plt.figure(figsize=(10, 4))
         plt.plot(dates, np.clip(true_vals,  1e-8, None), label="True", linewidth=1.5)
-        plt.plot(dates, np.clip(pred_vals,  1e-8, None), label="TSMixer", linewidth=1.2)
+        plt.plot(dates, np.clip(pred_vals,  1e-8, None), label="TFT", linewidth=1.2)
         plt.plot(dates, np.clip(garch_vals, 1e-8, None), label="GARCH", linewidth=1.0, linestyle="--")
         plt.title(f"{ticker} - Test Forecasts")
         plt.xlabel("Date")
@@ -179,7 +178,7 @@ def main() -> None:
 
         plt.figure(figsize=(10, 4))
         plt.plot(dates_roll, np.clip(true_roll,  1e-8, None), label="True", linewidth=1.5)
-        plt.plot(dates_roll, np.clip(pred_roll,  1e-8, None), label="TSMixer", linewidth=1.2)
+        plt.plot(dates_roll, np.clip(pred_roll,  1e-8, None), label="TFT", linewidth=1.2)
         plt.plot(dates_roll, np.clip(garch_roll, 1e-8, None), label="GARCH", linewidth=1.0, linestyle="--")
         plt.title(f"{ticker} - Test Forecasts")
         plt.xlabel("Date")
@@ -205,7 +204,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    import time
-    then = time.time()
     main()
-    print(round(time.time() - then, 2))

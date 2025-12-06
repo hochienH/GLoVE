@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from torch import nn
 from darts.models import TSMixerModel
+from pytorch_lightning.callbacks import EarlyStopping
 
 class WeightedLoss(nn.Module):
     """Two-component loss: true vs. prediction and GARCH vs. prediction."""
@@ -101,9 +102,6 @@ def parse_args() -> argparse.Namespace:
         default=3e-4,
         help=(
             "Initial learning rate for the Adam optimizer.  Empirical studies on the "
-            "ETT benchmark show that TSMixer often trains best with a learning rate "
-            "in the 1e-4 to 1e-3 range; a value around 3e-4 provided good results in "
-            "hyperparameter sweeps【931060673821606†L506-L514】."
         ),
     )
     parser.add_argument(
@@ -123,10 +121,7 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.5,
         help=(
-            "Clip value for gradient norm to prevent exploding gradients.  Gradient "
-            "clipping is recommended in PyTorch Lightning to stabilise training and "
-            "avoid large parameter updates; the Lightning documentation shows how "
-            "setting `gradient_clip_val` to 0.5 limits the gradient norm【895475883760702†L125-L150】."
+            "Clip value for gradient norm to prevent exploding gradients. "
         ),
     )
     parser.add_argument(
@@ -136,7 +131,6 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Hidden state size of the TSMixer (dimension of the second feed‑forward layer in the feature mixing MLP). "
             "The official TSMixer paper uses a hidden feature dimension of 32 and an expansion (ff) size of 64 with "
-            "eight mixer layers【790668481184313†L600-L609】.  Smaller hidden sizes can help prevent overfitting on small datasets."
         ),
     )
     parser.add_argument(
@@ -145,7 +139,6 @@ def parse_args() -> argparse.Namespace:
         default=64,
         help=(
             "Size of the first feed‑forward layer in the feature mixing MLP.  The expansion feature dimension is twice "
-            "the hidden size in the paper's configuration【790668481184313†L600-L609】."
         ),
     )
     parser.add_argument(
@@ -153,20 +146,13 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=4,
         help=(
-            "Number of mixer blocks in the TSMixer architecture.  Hyperparameter tuning on the ETT dataset found that 4 "
-            "mixer layers often perform well【931060673821606†L506-L514】, and deeper models (e.g., >4) may suffer from training "
-            "instability【324702943721686†L230-L239】."
+            "Number of mixer blocks in the TSMixer architecture"
         ),
     )
     parser.add_argument(
         "--dropout",
         type=float,
         default=0.1,
-        help=(
-            "Dropout probability for regularisation within mixer blocks.  The TSMixer paper uses 0.1 by default to mitigate "
-            "overfitting【790668481184313†L600-L609】.  For small datasets you may increase this value up to 0.5–0.8, as observed in "
-            "hyperparameter sweeps【931060673821606†L506-L514】."
-        ),
     )
     return parser.parse_args()
 
@@ -174,6 +160,16 @@ def parse_args() -> argparse.Namespace:
 def _prepare_covariates(covs: List[Optional[object]]) -> List[Optional[object]]:
     return covs if covs is not None else []
 
+# 讀取資料集後，對 TimeSeries 轉成 float32
+def _cast_series_list(series_list):
+    casted = []
+    for ts in series_list:
+        if ts is None:
+            casted.append(None)
+        else:
+            # 轉型為 float32，避免 BF16 混合精度時出現 Double/BFloat16 衝突
+            casted.append(ts.astype(np.float32))
+    return casted
 
 def main() -> None:
 
@@ -186,17 +182,6 @@ def main() -> None:
     with open(args.data, "rb") as f:
         dataset = pickle.load(f)
 
-    # 讀取資料集後，對 TimeSeries 轉成 float32
-    def _cast_series_list(series_list):
-        casted = []
-        for ts in series_list:
-            if ts is None:
-                casted.append(None)
-            else:
-                # 轉型為 float32，避免 BF16 混合精度時出現 Double/BFloat16 衝突
-                casted.append(ts.astype(np.float32))
-        return casted
-
     train_targets = _cast_series_list(dataset["train"]["target"])
     val_targets   = _cast_series_list(dataset["val"]["target"])
     train_covs    = _cast_series_list(_prepare_covariates(dataset["train"]["cov"]))
@@ -208,10 +193,6 @@ def main() -> None:
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     devices = 1 if accelerator == "cpu" else "auto"
 
-    # Configure learning rate scheduler if requested. ExponentialLR gradually
-    # reduces the learning rate during training, which can help convergence
-    # and reduce overfitting. See the Darts documentation for how to pass
-    # `lr_scheduler_cls` and `lr_scheduler_kwargs` into `TSMixerModel`.
     if args.lr_scheduler == "exponential":
         lr_scheduler_cls = torch.optim.lr_scheduler.ExponentialLR
         lr_scheduler_kwargs = {"gamma": args.lr_gamma}
@@ -219,10 +200,6 @@ def main() -> None:
         lr_scheduler_cls = None
         lr_scheduler_kwargs = None
 
-    # Early stopping callback: stop training if validation loss does not
-    # decrease by more than `min_delta` for `patience` epochs. Patience of 10
-    # was chosen following the TSMixer paper recommendations【462202303965851†L269-L299】.
-    from pytorch_lightning.callbacks import EarlyStopping
 
     early_stopper = EarlyStopping(
         monitor="val_loss",
@@ -231,9 +208,6 @@ def main() -> None:
         mode="min",
     )
 
-    # Progress bar callback for PyTorch Lightning. Enabling the progress bar
-    # provides feedback during training without cluttering the console.
-    # If the TFMProgressBar is unavailable, a default progress bar will be used.
     try:
         from darts.utils.callbacks import TFMProgressBar  # type: ignore
         progress_bar = TFMProgressBar(
@@ -243,8 +217,6 @@ def main() -> None:
     except Exception:
         callbacks = [early_stopper]
 
-    # Build PyTorch Lightning trainer configuration. Gradient clipping is
-    # activated via `gradient_clip_val` to mitigate gradient explosion【462202303965851†L260-L263】.
     pl_trainer_kwargs = {
         "accelerator": accelerator,
         "devices": devices,
@@ -256,11 +228,6 @@ def main() -> None:
         "precision" : "bf16-mixed",
         }
 
-    # Instantiate the TSMixer model with configurable hyperparameters.  The
-    # `add_encoders` argument adds cyclic encodings of the day of the week and
-    # month as future covariates, which helps the model capture calendar
-    # seasonality【462202303965851†L279-L283】.  Hidden size, feed‑forward size,
-    # number of blocks and dropout are exposed via command‑line arguments.
     model = TSMixerModel(
         input_chunk_length=input_chunk_length,
         output_chunk_length=1,
@@ -276,11 +243,6 @@ def main() -> None:
         optimizer_kwargs={"lr": args.lr},
         lr_scheduler_cls=lr_scheduler_cls,
         lr_scheduler_kwargs=lr_scheduler_kwargs,
-        # In addition to the past covariates supplied in the dataset, the model can
-        # automatically generate calendar-based covariates.  Following the Darts
-        # documentation, we include cyclic encodings of the hour, day‑of‑week and
-        # month so that the model can learn weekly and yearly seasonality【462202303965851†L279-L283】.
-        # ["hour", "dayofweek", "month"]
         add_encoders={"cyclic": {"future": ["dayofweek"]}},
         pl_trainer_kwargs=pl_trainer_kwargs,
     )
@@ -288,11 +250,6 @@ def main() -> None:
     has_val = any(ts is not None for ts in val_targets)
     has_val_cov = any(cov is not None for cov in val_covs)
 
-    # Fit the model. Passing `epochs` explicitly allows the fit method to know
-    # how many epochs to run in the absence of early stopping. If early
-    # stopping terminates training earlier, the model will still save the best
-    # checkpoint if checkpointing is enabled. We suppress verbose output to
-    # avoid cluttering the console.
     model.fit(
         series=train_targets,
         past_covariates=train_covs,

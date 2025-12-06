@@ -1,7 +1,0 @@
-gluonts
-matplotlib
-numpy
-pandas
-scikit_learn
-torch
-lightning

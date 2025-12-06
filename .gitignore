@@ -6,3 +6,6 @@ visualization_plots
 trained_model
 *.zip
 Dataset
+darts_logs
+lightning_logs
+models
