@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate trained TSMixer on the test split.")
     parser.add_argument("--data", required=True, help="Path to dataset pickle from dataset_builder.py")
     parser.add_argument("--model", required=True, help="Path to trained model (.pth)")
-    parser.add_argument("--output", default=None, help="outputs for images and csv.")
+    parser.add_argument("--output", default=None, help="Optional CSV path for metrics.")
     parser.add_argument(
         "--use_log_target",
         action="store_true",
@@ -56,6 +56,17 @@ def _combine_covariates(
 
 def _invert_log(values: np.ndarray, use_log_target: bool) -> np.ndarray:
     return np.expm1(values) if use_log_target else values
+
+def _qlike(true_vals: np.ndarray, pred_vals: np.ndarray, eps: float = 1e-8) -> float:
+    """
+    QLIKE loss for variance forecasts:
+    L = mean( y/h - log(y/h) - 1 ).
+    Smaller is better. Both y and h should be > 0.
+    """
+    true = np.clip(true_vals, eps, None)
+    pred = np.clip(pred_vals, eps, None)
+    ratio = true / pred
+    return float(np.mean(ratio - np.log(ratio) - 1.0))
 
 
 def main() -> None:
@@ -103,11 +114,10 @@ def main() -> None:
     )
 
     results: List[Tuple[str, float, float, float, float]] = []
-    dir_path = pathlib.Path(args.output)
-    dir_path.mkdir(parents=True, exist_ok=True)
-    plots_dir = pathlib.Path(args.output) / "plots"
+
+    plots_dir = pathlib.Path("outputs/plots")
     plots_dir.mkdir(parents=True, exist_ok=True)
-    rolling_plots_dir = pathlib.Path(args.output) / "rolling_plots"
+    rolling_plots_dir = pathlib.Path("outputs/rolling_plots")
     rolling_plots_dir.mkdir(parents=True, exist_ok=True)
 
     for idx, test_ts in enumerate(test_targets):
@@ -144,11 +154,20 @@ def main() -> None:
         mae_garch = float(np.mean(np.abs(garch_vals - true_vals)))
         rmse_garch = float(np.sqrt(np.mean((garch_vals - true_vals) ** 2)))
 
-        results.append((ticker, mae_model, rmse_model, mae_garch, rmse_garch))
+        qlike_model = _qlike(true_vals, pred_vals)
+        qlike_garch = _qlike(true_vals, garch_vals)
+
+
+        results.append((ticker, mae_model, rmse_model, mae_garch, rmse_garch,
+                        qlike_model, qlike_garch))
+
         print(
-            f"{ticker}: MAE_model={mae_model:.6f}, RMSE_model={rmse_model:.6f}, "
-            f"MAE_garch={mae_garch:.6f}, RMSE_garch={rmse_garch:.6f}"
+            f"{ticker}: "
+            f"MAE_model={mae_model:.6f}, RMSE_model={rmse_model:.6f}, "
+            f"MAE_garch={mae_garch:.6f}, RMSE_garch={rmse_garch:.6f}, "
+            f"QLIKE_model={qlike_model:.6f}, QLIKE_garch={qlike_garch:.6f}"
         )
+
 
         # Plot predictions vs actuals and GARCH baseline
         import matplotlib.pyplot as plt  # local import to keep dependency scope narrow
@@ -194,14 +213,37 @@ def main() -> None:
 
 
     if args.output:
-        output_path = pathlib.Path(args.output) / "metrics.csv"
+        output_path = pathlib.Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(["code", "MAE_model", "RMSE_model", "MAE_garch", "RMSE_garch"])
+            #writer.writerow(["code", "MAE_model", "RMSE_model", "MAE_garch", "RMSE_garch"])
+            writer.writerow([
+            "code",
+            "MAE_model", "RMSE_model", "MAE_garch", "RMSE_garch",
+            "QLIKE_model", "QLIKE_garch",
+        ])
+
             for row in results:
                 writer.writerow(row)
         print(f"Evaluation metrics saved to {output_path}")
+
+    if results:
+        res_arr = np.array(results, dtype=object)  # ticker is str, so use object
+        mae_model_mean   = float(np.mean(res_arr[:, 1].astype(float)))
+        rmse_model_mean  = float(np.mean(res_arr[:, 2].astype(float)))
+        mae_garch_mean   = float(np.mean(res_arr[:, 3].astype(float)))
+        rmse_garch_mean  = float(np.mean(res_arr[:, 4].astype(float)))
+        qlike_model_mean = float(np.mean(res_arr[:, 5].astype(float)))
+        qlike_garch_mean = float(np.mean(res_arr[:, 6].astype(float)))
+
+        print("\n=== Overall averages across tickers ===")
+        print(f"MAE_model_mean   = {mae_model_mean:.6f}")
+        print(f"RMSE_model_mean  = {rmse_model_mean:.6f}")
+        print(f"MAE_garch_mean   = {mae_garch_mean:.6f}")
+        print(f"RMSE_garch_mean  = {rmse_garch_mean:.6f}")
+        print(f"QLIKE_model_mean = {qlike_model_mean:.6f}")
+        print(f"QLIKE_garch_mean = {qlike_garch_mean:.6f}")
 
 
 if __name__ == "__main__":
