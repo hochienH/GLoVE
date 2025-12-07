@@ -282,15 +282,20 @@ def main() -> None:
     # stopping terminates training earlier, the model will still save the best
     # checkpoint if checkpointing is enabled. We suppress verbose output to
     # avoid cluttering the console.
-    model.fit(
-        series=train_targets,
-        past_covariates=train_covs,
-        val_series=val_targets if has_val else None,
-        val_past_covariates=val_covs if has_val_cov else None,
-        epochs=args.epochs,
-        dataloader_kwargs={"batch_size": args.batch_size},
-        verbose=False,
-    )
+    fit_kwargs = {
+        "series": train_targets,
+        "val_series": val_targets if has_val else None,
+        "epochs": args.epochs,
+        "dataloader_kwargs": {"batch_size": args.batch_size},
+        "verbose": False,
+    }
+
+    if args.covariate_mode == "lagged":
+        # Using covariates（alpha + feature）to train
+        fit_kwargs["past_covariates"] = train_covs
+        fit_kwargs["val_past_covariates"]=val_covs if has_val_cov else None
+
+    model.fit(**fit_kwargs)
 
     model_path = pathlib.Path(args.model_path)
     model_path.parent.mkdir(parents=True, exist_ok=True)

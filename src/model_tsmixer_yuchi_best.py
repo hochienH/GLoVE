@@ -286,6 +286,19 @@ def main() -> None:
     if accelerator == "gpu":
         activities.append(ProfilerActivity.CUDA)
 
+    fit_kwargs = {
+        "series": fit_targets,
+        "val_series": fit_val_targets if has_val else None,
+        "epochs": args.epochs,
+        "dataloader_kwargs": {"batch_size": args.batch_size},
+        "verbose": args.verbose,
+    }
+
+    if args.covariate_mode == "lagged":
+        # Using covariates（alpha + feature）to train
+        fit_kwargs["past_covariates"] = fit_covs
+        fit_kwargs["val_past_covariates"]=fit_val_covs if has_val_cov else None
+        
     with profile(
         activities=activities,
         record_shapes=True,
@@ -295,15 +308,7 @@ def main() -> None:
     ) as prof:
         start_time = time.perf_counter()
 
-        model.fit(
-            series=fit_targets,
-            past_covariates=fit_covs,
-            val_series=fit_val_targets if has_val else None,
-            val_past_covariates=fit_val_covs if has_val_cov else None,
-            epochs=args.epochs,
-            dataloader_kwargs={"batch_size": args.batch_size},
-            verbose=args.verbose,
-        )
+        model.fit(**fit_kwargs)
 
         end_time = time.perf_counter()
     # ===== Profiler end =====
