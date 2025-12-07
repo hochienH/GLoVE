@@ -7,12 +7,11 @@
 # 所有模型會儲存在 models/ 資料夾中，檔名包含對應的 lambda 值
 # 
 # 使用方式：
-#   ./train_all_lambdas.sh                    # 順序執行
-#   ./train_all_lambdas.sh --parallel 4       # 平行執行 4 個任務
-#   ./train_all_lambdas.sh --nohup            # 背景執行（使用 nohup）
-#   ./train_all_lambdas.sh --parallel 4 --nohup  # 平行 + 背景執行
+#   ./train_lstm_lambdas.sh                    # 順序執行
+#   ./train_lstm_lambdas.sh --parallel 4       # 平行執行 4 個任務
+#   ./train_lstm_lambdas.sh --nohup            # 背景執行（使用 nohup）
+#   ./train_lstm_lambdas.sh --parallel 4 --nohup  # 平行 + 背景執行
 # ============================================================================
-
 # 解析命令列參數
 PARALLEL_JOBS=1
 USE_NOHUP=false
@@ -67,18 +66,14 @@ mkdir -p models
 mkdir -p "${LOG_DIR}"
 
 # 計算總共要訓練的模型數量
-TOTAL_MODELS=$((${#LAMBDAS[@]} * 2))
+TOTAL_MODELS=$((${#LAMBDAS[@]}))
 
-# 建立任務列表（每個 lambda 值對應兩個任務：TSMixer 和 LSTM）
 declare -a TASKS
 
 task_id=0
 for lambda_val in "${LAMBDAS[@]}"; do
     lambda_str=$(echo "$lambda_val" | tr '.' '_')
     
-    # TSMixer 任務
-    TASKS[$task_id]="tsmixer:${lambda_val}:${lambda_str}"
-    task_id=$((task_id + 1))
     
     # LSTM 任務
     TASKS[$task_id]="lstm:${lambda_val}:${lambda_str}"
@@ -98,59 +93,14 @@ train_model() {
     local model_path=""
     local log_file="${LOG_DIR}/${model_type}_lambda${lambda_str}.log"
     
-    if [ "$model_type" == "tsmixer" ]; then
-        model_path="models/tsmixer_lambda${lambda_str}.pth"
-        echo "[任務 ${task_num}/${total_tasks}] 開始訓練 TSMixer (lambda=${lambda_val})"
-        echo "  模型: ${model_path}"
-        echo "  日誌: ${log_file}"
         
-        if [ "$USE_NOHUP" == true ]; then
-            nohup python src/model_train.py \
-                --data "${DATA_PATH}" \
-                --lambda "${lambda_val}" \
-                --epochs 6 \
-                --lr 3e-4 \
-                --lr_scheduler exponential \
-                --lr_gamma 0.99 \
-                --grad_clip 0.5 \
-                --hidden_size 32 \
-                --ff_size 64 \
-                --num_blocks 4 \
-                --dropout 0.1 \
-                --model_path "${model_path}" \
-                > "${log_file}" 2>&1
-        else
-            python src/model_train.py \
-                --data "${DATA_PATH}" \
-                --lambda "${lambda_val}" \
-                --epochs 6 \
-                --lr 3e-4 \
-                --lr_scheduler exponential \
-                --lr_gamma 0.99 \
-                --grad_clip 0.5 \
-                --hidden_size 32 \
-                --ff_size 64 \
-                --num_blocks 4 \
-                --dropout 0.1 \
-                --model_path "${model_path}" \
-                > "${log_file}" 2>&1
-        fi
-        
-        local exit_code=$?
-        if [ $exit_code -eq 0 ]; then
-            echo "[任務 ${task_num}/${total_tasks}] ✓ TSMixer (lambda=${lambda_val}) 訓練完成"
-            return 0
-        else
-            echo "[任務 ${task_num}/${total_tasks}] ✗ TSMixer (lambda=${lambda_val}) 訓練失敗 (退出碼: ${exit_code})"
-            return 1
-        fi
-        
-    elif [ "$model_type" == "lstm" ]; then
+    if [ "$model_type" == "lstm" ]; then
         model_path="models/lstm_lambda${lambda_str}.pth"
         echo "[任務 ${task_num}/${total_tasks}] 開始訓練 LSTM (lambda=${lambda_val})"
         echo "  模型: ${model_path}"
         echo "  日誌: ${log_file}"
-        
+        # version 1 : No use future_covariates, and use  safe mode(covariate_mode none)
+        # version 2 : Use future_covariates, and use safe mode(covariate_mode none)
         if [ "$USE_NOHUP" == true ]; then
             nohup python src/model_train_lstm.py \
                 --data "${DATA_PATH}" \
@@ -162,6 +112,8 @@ train_model() {
                 --grad_clip 0.5 \
                 --hidden_size 32 \
                 --dropout 0.1 \
+                --covariate_mode lagged \
+                --covariate_lag 1 \
                 --model_path "${model_path}" \
                 > "${log_file}" 2>&1
         else
@@ -175,6 +127,8 @@ train_model() {
                 --grad_clip 0.5 \
                 --hidden_size 32 \
                 --dropout 0.1 \
+                --covariate_mode lagged \
+                --covariate_lag 1 \
                 --model_path "${model_path}" \
                 > "${log_file}" 2>&1
         fi
@@ -195,7 +149,6 @@ train_model() {
 # ============================================================================
 echo "=========================================="
 echo "開始大量訓練：共 ${TOTAL_MODELS} 個模型"
-echo "TSMixer: ${#LAMBDAS[@]} 個 lambda 值"
 echo "LSTM: ${#LAMBDAS[@]} 個 lambda 值"
 echo "執行模式: $([ $PARALLEL_JOBS -gt 1 ] && echo "平行執行 (${PARALLEL_JOBS} 個並發)" || echo "順序執行")"
 echo "$([ "$USE_NOHUP" == true ] && echo "背景執行: 是 (使用 nohup)" || echo "背景執行: 否")"
@@ -303,16 +256,3 @@ echo ""
 echo "=========================================="
 echo "訓練腳本執行完成！"
 echo "=========================================="
-echo ""
-echo "執行時間: ${HOURS} 小時 ${MINUTES} 分鐘 ${SECONDS} 秒"
-echo "模型儲存位置: models/"
-echo "  TSMixer 模型: models/tsmixer_lambda*.pth"
-echo "  LSTM 模型: models/lstm_lambda*.pth"
-echo "日誌檔案位置: ${LOG_DIR}/"
-echo "  TSMixer 日誌: ${LOG_DIR}/tsmixer_lambda*.log"
-echo "  LSTM 日誌: ${LOG_DIR}/lstm_lambda*.log"
-echo ""
-echo "可以使用以下指令查看："
-echo "  ls -lh models/"
-echo "  ls -lh ${LOG_DIR}/"
-echo ""

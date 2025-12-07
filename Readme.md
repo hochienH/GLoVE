@@ -54,6 +54,19 @@ bash eval_all_lambdas.sh --parallel 4
 ```
 
 ### 6. 資料視覺化和資訊整理 
+5. 輸出結果 python src/model_predict_eval.py --data Dataset_reenact_yuchi/ts_data.pkl --model models/tsmixer_lambda0_reviselr.pth --output outputs/lambda_0_1/
+
+
+or lstm prediction
+python src/predict_lstm.py \
+  --data Dataset_reenact_yuchi/ts_data.pkl \
+  --model models/lstm.pth \
+  --split test \
+  --output outputs/lambda_0_1
+  --save_plots
+
+### 如果用bash:使用 ./eval_all_lambdas.sh --parallel 4
+6. 資料視覺化和資訊整理 
 python src/data_visualization.py \
   --input outputs/lambda_0_1/metrics.csv \
   --input outputs/lambda_0_1/metrics.png \
