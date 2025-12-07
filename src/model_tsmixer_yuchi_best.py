@@ -2,13 +2,15 @@ import argparse
 import pathlib
 import pickle
 from typing import List, Optional
-
+import time
 import numpy as np
 import torch
 from torch import nn
 import darts
 from darts.models import TSMixerModel
 from pytorch_lightning.callbacks import EarlyStopping
+from torch.profiler import profile, record_function, ProfilerActivity
+from pytorch_lightning.profiler import AdvancedProfiler
 
 # 若有 CUDA 可用，設定更高的矩陣運算精度以提升 Tensor Cores 效能
 if torch.cuda.is_available():
@@ -71,6 +73,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--combine_train_val",action="store_true",help="If set, combine train and validation sets for final training.",)
     # 其他選項
     parser.add_argument("--save_checkpoints",action="store_true",help="Enable model checkpointing during training.",)
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cpu", "gpu","mps"],
+        default="auto",
+        required=True,
+        help="Device to use for training: auto / cpu / gpu / mps",
+    )
     parser.add_argument("--verbose",action="store_true",default=2,help="Enable verbose output during training.",)
     return parser.parse_args()
 
@@ -145,19 +154,50 @@ def main() -> None:
         fit_val_targets = val_targets
         fit_val_covs = val_covs
     
-    # 自動偵測裝置：CUDA > MPS > CPU
-    if torch.cuda.is_available():
-        accelerator = "gpu"
-        devices = "auto"
-        precision = "bf16-mixed"
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        accelerator = "mps"
-        devices = "auto"
-        precision = 32
-    else:
+    # # 自動偵測裝置：CUDA > MPS > CPU
+    # if torch.cuda.is_available():
+    #     accelerator = "gpu"
+    #     devices = "auto"
+    #     precision = "bf16-mixed"
+    # elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    #     accelerator = "mps"
+    #     devices = "auto"
+    #     precision = 32
+    # else:
+    #     accelerator = "cpu"
+    #     devices = 1
+    #     precision = 32
+    # 選擇裝置：使用 args.device 覆蓋自動偵測
+    if args.device == "cpu":
         accelerator = "cpu"
         devices = 1
         precision = 32
+    elif args.device == "gpu":
+        if not torch.cuda.is_available():
+            raise RuntimeError("GPU requested but CUDA is not available.")
+        accelerator = "gpu"
+        devices = 1   # 為了公平比較，先固定單卡
+        precision = "bf16-mixed"
+    elif args.device == "mps":
+        if not hasattr(torch.backends, "mps") or not torch.backends.mps.is_available():
+            raise RuntimeError("MPS requested but is not available.")
+        accelerator = "mps"
+        devices = "auto"
+        precision = 32
+    else:  # auto
+        if torch.cuda.is_available():
+            accelerator = "gpu"
+            devices = 1
+            precision = "bf16-mixed"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            accelerator = "mps"
+            devices = "auto"
+            precision = 32
+        else:
+            accelerator = "cpu"
+            devices = 1
+            precision = 32
+
     
     print(f"Using accelerator: {accelerator}, precision: {precision}")
     
@@ -200,7 +240,9 @@ def main() -> None:
         "gradient_clip_val": args.grad_clip,
         "max_epochs": args.epochs,
         "precision": precision,
+        "profiler": AdvancedProfiler(filename="pl_profiler.txt"),
     }
+
     
     # 建立模型
     print(f"Creating TSMixer model with:")
@@ -239,21 +281,52 @@ def main() -> None:
     
     # 訓練模型
     print("\nStarting training...")
-    model.fit(
-        series=fit_targets,
-        past_covariates=fit_covs,
-        val_series=fit_val_targets if has_val else None,
-        val_past_covariates=fit_val_covs if has_val_cov else None,
-        epochs=args.epochs,
-        dataloader_kwargs={"batch_size": args.batch_size},
-        verbose=args.verbose,
-    )
     
+    activities = [ProfilerActivity.CPU]
+    if accelerator == "gpu":
+        activities.append(ProfilerActivity.CUDA)
+
+    with profile(
+        activities=activities,
+        record_shapes=True,
+        with_stack=False,
+        profile_memory=True,
+        with_flops=True,
+    ) as prof:
+        start_time = time.perf_counter()
+
+        model.fit(
+            series=fit_targets,
+            past_covariates=fit_covs,
+            val_series=fit_val_targets if has_val else None,
+            val_past_covariates=fit_val_covs if has_val_cov else None,
+            epochs=args.epochs,
+            dataloader_kwargs={"batch_size": args.batch_size},
+            verbose=args.verbose,
+        )
+
+        end_time = time.perf_counter()
+    # ===== Profiler end =====
+
     # 儲存模型
+    elapsed = end_time - start_time
+    print(f"\nTraining finished in {elapsed:.2f} seconds on device={accelerator}")
+
     model_path = pathlib.Path(args.model_path)
     model_path.parent.mkdir(parents=True, exist_ok=True)
     model.save(str(model_path))
     print(f"\nModel trained and saved to {model_path}")
+    # 在 CPU / GPU 上印出最慢的 20 個 op
+    print("\n=== Top 30 ops by CUDA time (if any) ===")
+    try:
+        print(prof.key_averages().table(
+            sort_by="cuda_time_total" if accelerator == "gpu" else "cpu_time_total",
+            row_limit=30,
+        ))
+    except Exception as e:
+        print(f"Profiler table error: {e}")
+    prof.export_chrome_trace("tsmixer_profile.json")
+    print("Chrome trace exported to tsmixer_profile.json (open with chrome://tracing)")
 
 
 if __name__ == "__main__":
