@@ -157,18 +157,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _prepare_covariates(covs: List[Optional[object]]) -> List[Optional[object]]:
-    return covs if covs is not None else []
-
 # 讀取資料集後，對 TimeSeries 轉成 float32
 def _cast_series_list(series_list):
     casted = []
     for ts in series_list:
-        if ts is None:
-            casted.append(None)
-        else:
-            # 轉型為 float32，避免 BF16 混合精度時出現 Double/BFloat16 衝突
-            casted.append(ts.astype(np.float32))
+        casted.append(ts.astype(np.float32) if ts is not None else None)
     return casted
 
 def main() -> None:
@@ -184,8 +177,8 @@ def main() -> None:
 
     train_targets = _cast_series_list(dataset["train"]["target"])
     val_targets   = _cast_series_list(dataset["val"]["target"])
-    train_covs    = _cast_series_list(_prepare_covariates(dataset["train"]["cov"]))
-    val_covs      = _cast_series_list(_prepare_covariates(dataset["val"]["cov"]))
+    train_covs    = _cast_series_list(dataset["train"]["cov"])
+    val_covs      = _cast_series_list(dataset["val"]["cov"])
 
     input_chunk_length = args.input_chunk_length or dataset.get("input_chunk_length", 90)
     use_static = dataset.get("static_mode", "none") != "none"

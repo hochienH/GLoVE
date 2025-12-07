@@ -44,8 +44,8 @@ python src/model_train.py `
 
 python src/model_train_tsmixer_optuna.py `
    --data Dataset/ts_data.pkl `
-   --trials 10 `
-   --epochs 2 `
+   --trials 100 `
+   --epochs 10 `
    --batch_size 32 `
    --lambda_weight 1 `
    --lr_min 1e-4 `
@@ -58,12 +58,47 @@ python src/model_train_tsmixer_optuna.py `
    --output_model models/tsmixer_optuna.pth `
    --seed 42
 
-
 # 評估模型
 python src/model_predict_eval.py `
     --data Dataset/ts_data.pkl `
     --model models/tsmixer_optuna.pth `
     --output outputs/tsmixer_optuna_metrics.csv
+
+python src/model_train_tsmixer_optuna_DeepEnsemble.py `
+  --data Dataset/ts_data.pkl `
+  --trials 100 `
+  --epochs 10 `
+  --batch_size 32 `
+  --lambda_weight 1 `
+  --lr_min 1e-4 `
+  --lr_max 1e-2 `
+  --num_blocks 4 `
+  --log_dir logs `
+  --output_model models/tsmixer_optuna.pth `
+  --ensemble_runs 10 `
+  --seed 42
+
+python src/model_predict_eval_ensemble.py `
+    --data Dataset/ts_data.pkl `
+    --model_base models/tsmixer_optuna.pth `
+    --output outputs/metrics_ensemble.csv
+
+python src/model_train_tsmixer_optuna_ParamsEnsemble.py `
+  --data Dataset/ts_data.pkl `
+  --trials 10 `
+  --ensemble_runs 10 `
+  --epochs 5 `
+  --batch_size 32 `
+  --lambda_weight 1 `
+  --lr_min 1e-4 `
+  --lr_max 1e-2 `
+  --num_blocks 4 `
+  --log_dir logs `
+  --output_model models/tsmixer_optuna.pth `
+  --trial_csv outputs/optuna_lr_trials.csv `
+  --seed 42
+
+
 
 
 # TFT

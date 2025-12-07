@@ -5,6 +5,7 @@ import pickle
 from typing import List, Optional, Tuple
 
 import numpy as np
+import torch
 from darts import TimeSeries
 from darts.models import TSMixerModel
 
@@ -13,10 +14,11 @@ from model_train import WeightedLoss  # noqa: F401
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate trained TSMixer on the test split.")
+    parser = argparse.ArgumentParser(description="Evaluate ensemble of TSMixer models on the test split.")
     parser.add_argument("--data", required=True, help="Path to dataset pickle from dataset_builder.py")
-    parser.add_argument("--model", required=True, help="Path to trained model (.pth)")
-    parser.add_argument("--output", default=None, help="Output directory for metrics and plots.")
+    parser.add_argument("--model_base", required=True, help="Base path to ensemble models (suffix _1..._N will be used).")
+    parser.add_argument("--ensemble_runs", type=int, default=10, help="Number of ensemble members to load.")
+    parser.add_argument("--output", default=None, help="Optional CSV path for metrics.")
     parser.add_argument(
         "--use_log_target",
         action="store_true",
@@ -58,56 +60,56 @@ def _invert_log(values: np.ndarray, use_log_target: bool) -> np.ndarray:
     return np.expm1(values) if use_log_target else values
 
 
+def _cast_series_list(series_list):
+    casted = []
+    for ts in series_list:
+        casted.append(ts.astype(np.float32) if ts is not None else None)
+    return casted
+
+
 def main() -> None:
     args = parse_args()
     with open(args.data, "rb") as f:
         dataset = pickle.load(f)
 
-    def _cast_series_list(series_list):
-        casted = []
-        for ts in series_list:
-            if ts is None:
-                casted.append(None)
-            else:
-                casted.append(ts.astype(np.float32))
-        return casted
-
-    def _prepare_covariates(covs):
-        return covs if covs is not None else []
-
-    # 這裡全部都變成 float32 的 TimeSeries
     train_targets: List[Optional[TimeSeries]] = _cast_series_list(dataset["train"]["target"])
-    val_targets: List[Optional[TimeSeries]]   = _cast_series_list(dataset["val"]["target"])
-    test_targets: List[Optional[TimeSeries]]  = _cast_series_list(dataset["test"]["target"])
-    train_covs: List[Optional[TimeSeries]] = _cast_series_list(_prepare_covariates(dataset["train"]["cov"]))
-    val_covs: List[Optional[TimeSeries]]   = _cast_series_list(_prepare_covariates(dataset["val"]["cov"]))
-    test_covs: List[Optional[TimeSeries]]  = _cast_series_list(_prepare_covariates(dataset["test"]["cov"]))
+    val_targets: List[Optional[TimeSeries]] = _cast_series_list(dataset["val"]["target"])
+    test_targets: List[Optional[TimeSeries]] = _cast_series_list(dataset["test"]["target"])
+    train_covs: List[Optional[TimeSeries]] = _cast_series_list(dataset["train"]["cov"])
+    val_covs: List[Optional[TimeSeries]] = _cast_series_list(dataset["val"]["cov"])
+    test_covs: List[Optional[TimeSeries]] = _cast_series_list(dataset["test"]["cov"])
     tickers: List[str] = dataset.get("tickers", [])
 
-    import torch
-    from darts.models import TSMixerModel
-
-    # 給 matmul 一點空間，不一定必要，但順手加
+    # matmul precision preference
     torch.set_default_dtype(torch.float32)
     torch.set_float32_matmul_precision("high")
 
-    # model = TSMixerModel.load(args.model)
+    base_path = pathlib.Path(args.model_base)
+    model_paths = [base_path.with_name(f"{base_path.stem}_{i+1}{base_path.suffix}") for i in range(args.ensemble_runs)]
+    models = []
+    for p in model_paths:
+        if p.exists():
+            m = TSMixerModel.load(
+                str(p),
+                pl_trainer_kwargs={
+                    "accelerator": "gpu",
+                    "devices": [0],
+                    "precision": "bf16-mixed",
+                },
+            )
+            models.append(m)
+        else:
+            print(f"Warning: ensemble member not found at {p}, skipping.")
 
-    model = TSMixerModel.load(
-        args.model,
-        pl_trainer_kwargs={
-            "accelerator": "gpu",
-            "devices": [0],
-            "precision": "bf16-mixed", 
-        },
-    )
+    if not models:
+        raise FileNotFoundError("No ensemble models were loaded; please check model_base and ensemble_runs.")
 
     results: List[Tuple[str, float, float, float, float]] = []
 
     if args.output:
         out_dir = pathlib.Path(args.output)
     else:
-        out_dir = pathlib.Path("outputs/Base")
+        out_dir = pathlib.Path("outputs/Ensemble")
     plots_dir = out_dir / "plots"
     rolling_plots_dir = out_dir / "rolling_plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
@@ -122,19 +124,24 @@ def main() -> None:
         history_covariates = _combine_covariates(train_covs, val_covs, test_covs[idx], idx)
 
         start_time = test_ts.start_time()
-        preds = model.historical_forecasts(
-            series=history_series,
-            past_covariates=history_covariates,
-            start=start_time,
-            forecast_horizon=1,
-            stride=1,
-            retrain=False,
-            verbose=False,
-            last_points_only=True,
-            # predict_kwargs={"dataloader_kwargs": {"num_workers": 1, "persistent_workers":True}}
-        )
+        member_preds = []
+        for m in models:
+            preds = m.historical_forecasts(
+                series=history_series,
+                past_covariates=history_covariates,
+                start=start_time,
+                forecast_horizon=1,
+                stride=1,
+                retrain=False,
+                verbose=False,
+                last_points_only=True,
+            )
+            member_preds.append(preds.to_dataframe().iloc[:, 0].to_numpy())
 
-        pred_vals = preds.to_dataframe().iloc[:, 0].to_numpy()
+        if not member_preds:
+            continue
+
+        pred_vals = np.mean(member_preds, axis=0)
         truth_df = test_ts.to_dataframe()
         true_vals = truth_df.iloc[:, 0].to_numpy()
         garch_vals = truth_df.iloc[:, 1].to_numpy()
@@ -160,13 +167,13 @@ def main() -> None:
         dates = test_ts.time_index
 
         plt.figure(figsize=(10, 4))
-        plt.plot(dates, np.clip(true_vals,  1e-8, None), label="True", linewidth=1.5)
-        plt.plot(dates, np.clip(pred_vals,  1e-8, None), label="TSMixer", linewidth=1.2)
+        plt.plot(dates, np.clip(true_vals, 1e-8, None), label="True", linewidth=1.5)
+        plt.plot(dates, np.clip(pred_vals, 1e-8, None), label="TSMixer (ensemble)", linewidth=1.2)
         plt.plot(dates, np.clip(garch_vals, 1e-8, None), label="GARCH", linewidth=1.0, linestyle="--")
-        plt.title(f"{ticker} - Test Forecasts")
+        plt.title(f"{ticker} - Test Forecasts (Ensemble)")
         plt.xlabel("Date")
         plt.ylabel("Volatility")
-        plt.yscale('log', base=10)
+        plt.yscale("log", base=10)
         plt.ylim(1e-2, 1e2)
         plt.yticks([1e-2, 1e-1, 1, 1e1, 1e2], [r"$10^{-2}$", r"$10^{-1}$", r"$10^{0}$", r"$10^{1}$", r"$10^{2}$"])
         plt.legend()
@@ -176,26 +183,25 @@ def main() -> None:
 
         window = 5
         kernel = np.ones(window) / window
-        true_roll  = np.convolve(true_vals,  kernel, mode='valid')
-        pred_roll  = np.convolve(pred_vals,  kernel, mode='valid')
-        garch_roll = np.convolve(garch_vals, kernel, mode='valid')
-        dates_roll = dates[window-1:]
+        true_roll = np.convolve(true_vals, kernel, mode="valid")
+        pred_roll = np.convolve(pred_vals, kernel, mode="valid")
+        garch_roll = np.convolve(garch_vals, kernel, mode="valid")
+        dates_roll = dates[window - 1 :]
 
         plt.figure(figsize=(10, 4))
-        plt.plot(dates_roll, np.clip(true_roll,  1e-8, None), label="True", linewidth=1.5)
-        plt.plot(dates_roll, np.clip(pred_roll,  1e-8, None), label="TSMixer", linewidth=1.2)
+        plt.plot(dates_roll, np.clip(true_roll, 1e-8, None), label="True", linewidth=1.5)
+        plt.plot(dates_roll, np.clip(pred_roll, 1e-8, None), label="TSMixer (ensemble)", linewidth=1.2)
         plt.plot(dates_roll, np.clip(garch_roll, 1e-8, None), label="GARCH", linewidth=1.0, linestyle="--")
-        plt.title(f"{ticker} - Test Forecasts")
+        plt.title(f"{ticker} - Test Forecasts (Ensemble, {window}-day MA)")
         plt.xlabel("Date")
         plt.ylabel("Volatility")
-        plt.yscale('log', base=10)
+        plt.yscale("log", base=10)
         plt.ylim(1e-2, 1e2)
         plt.yticks([1e-2, 1e-1, 1, 1e1, 1e2], [r"$10^{-2}$", r"$10^{-1}$", r"$10^{0}$", r"$10^{1}$", r"$10^{2}$"])
         plt.legend()
         plt.tight_layout()
-        plt.savefig(rolling_plots_dir /f"{ticker}.png", dpi=150)
+        plt.savefig(rolling_plots_dir / f"{ticker}.png", dpi=150)
         plt.close()
-
 
     out_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = out_dir / "metrics.csv"
@@ -208,7 +214,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    import time
-    then = time.time()
     main()
-    print(round(time.time() - then, 2))
