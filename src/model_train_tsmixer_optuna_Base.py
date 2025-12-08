@@ -80,6 +80,7 @@ def main() -> None:
         loss_fn=WeightedLoss(args.lambda_weight),
         random_state=args.seed,
         optimizer_kwargs={"lr": best_params["lr"]},
+        add_encoders=None,
         pl_trainer_kwargs={
             "accelerator": runner.accelerator,
             "devices": runner.devices,
@@ -103,6 +104,7 @@ def main() -> None:
         verbose=True,
     )
     final_model = TSMixerModel.load_from_checkpoint(model_name="TSMixer_final", best=True)
+    Path(args.output_model).parent.mkdir(parents=True, exist_ok=True)
     final_model.save(args.output_model)
     print(f"Saved best model to {args.output_model}")
 

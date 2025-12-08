@@ -1,0 +1,2 @@
+number,value,state,duration,lr,num_blocks,dropout,hidden_size,ff_size
+0,0.6237630248069763,COMPLETE,0 days 00:05:17.177223,0.001,2,0.2,32,32

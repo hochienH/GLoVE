@@ -126,9 +126,10 @@ def preprocess_data(
         df["industry_code"] = df["industry_code"].fillna("unknown").astype(str)
 
     if use_log_target:
-        df[target_col] = np.log1p(np.clip(df[target_col], a_min=0, a_max=None))
+        eps = 1
+        df[target_col] = np.log(np.clip(df[target_col], a_min=0, a_max=None) + eps)
         if garch_col in df.columns:
-            df[garch_col] = np.log1p(np.clip(df[garch_col], a_min=0, a_max=None))
+            df[garch_col] = np.log(np.clip(df[garch_col], a_min=0, a_max=None) + eps)
 
     cleaned, dropped = _apply_burn_in(
         df=df,

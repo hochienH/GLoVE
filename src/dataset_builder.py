@@ -8,9 +8,6 @@ import pandas as pd
 from darts import TimeSeries
 
 
-SplitDict = Dict[str, Dict[str, List[Optional[TimeSeries]]]]
-
-
 def _load_dataframe(path: pathlib.Path) -> pd.DataFrame:
     if path.suffix.lower() in {".pkl", ".pickle"}:
         return pd.read_pickle(path)
@@ -84,10 +81,15 @@ def build_datasets(
     test_frac: float,
     input_chunk_length: int,
     static_mode: str,
+    scale_target: str,
 ) -> Dict[str, object]:
     df = df.sort_values(["code", "date"]).reset_index(drop=True)
     if garch_col not in df.columns:
         raise ValueError(f"GARCH column '{garch_col}' is required for training.")
+
+    # 全域交易日曆（只含實際交易日），並建立 date -> t_idx 映射
+    trading_calendar = pd.DatetimeIndex(sorted(df["date"].unique()))
+    date_to_tidx = {dt: idx for idx, dt in enumerate(trading_calendar)}
 
     feature_cols = [
         c
@@ -105,6 +107,11 @@ def build_datasets(
         "garch_col": garch_col,
         "static_mode": static_mode,
         "input_chunk_length": input_chunk_length,
+        "scale_target": scale_target,
+        "target_means": {},
+        "target_stds": {},
+        "trading_calendar": list(trading_calendar),
+        "date_index": {},  # per ticker: list of dates aligned to t_idx
     }
 
     code_to_industry = {
@@ -116,14 +123,21 @@ def build_datasets(
     min_train_len = input_chunk_length + 1
     for code, group in df.groupby("code"):
         group = group.sort_values("date").set_index("date")
-        full_index = pd.date_range(group.index.min(), group.index.max(), freq="B")
-        group = group.reindex(full_index)
-        group = group.ffill()
+        # Align to實際交易日，僅在交易日曆範圍內補值
+        full_index = trading_calendar[(trading_calendar >= group.index.min()) & (trading_calendar <= group.index.max())]
+        group = group.reindex(full_index).ffill()
+
         group["code"] = str(code)
         if "industry_code" in group.columns:
             first_industry = group["industry_code"].dropna().iloc[0] if group["industry_code"].notna().any() else "unknown"
             group["industry_code"] = group["industry_code"].fillna(first_industry)
         group = group.reset_index().rename(columns={"index": "date"})
+        # 日曆特徵（等價於 add_encoders 的 dayofweek）
+        group["weekday"] = group["date"].dt.weekday
+        group["wd_sin"] = np.sin(2 * np.pi * group["weekday"] / 7)
+        group["wd_cos"] = np.cos(2 * np.pi * group["weekday"] / 7)
+        # t_idx 對應全域交易日
+        group["t_idx"] = group["date"].map(date_to_tidx).astype(int)
         group = group.dropna(subset=[target_col, garch_col])
         n_obs = len(group)
         if n_obs < min_train_len:
@@ -138,37 +152,43 @@ def build_datasets(
         val_df = group.iloc[train_end : train_end + val_len] if val_len > 0 else None
         test_df = group.iloc[train_end + val_len :] if test_len > 0 else None
 
+        train_mean = float(train_df[target_col].mean()) if not train_df.empty else np.nan
+        train_stdev = float(train_df[target_col].std()) if not train_df.empty else np.nan
+        if scale_target != "none" and np.isfinite(train_mean):
+            if scale_target == "mean" and train_mean != 0:
+                for part_df in (train_df, val_df, test_df):
+                    if part_df is not None:
+                        part_df.loc[:, target_col] = part_df[target_col] / train_mean
+                        if garch_col in part_df.columns:
+                            part_df.loc[:, garch_col] = part_df[garch_col] / train_mean
+                dataset["target_means"][str(code)] = train_mean
+            elif scale_target == "zscore" and np.isfinite(train_stdev) and train_stdev != 0:
+                for part_df in (train_df, val_df, test_df):
+                    if part_df is not None:
+                        part_df.loc[:, target_col] = (part_df[target_col] - train_mean) / train_stdev
+                        if garch_col in part_df.columns:
+                            part_df.loc[:, garch_col] = (part_df[garch_col] - train_mean) / train_stdev
+                dataset["target_means"][str(code)] = train_mean
+                dataset["target_stds"][str(code)] = train_stdev
+
         target_value_cols = [target_col, garch_col]
         ts_kwargs = {
-            "time_col": "date",
+            "time_col": "t_idx",
             "value_cols": target_value_cols,
-            "fill_missing_dates": True,
-            "freq": "B",
+            "fill_missing_dates": False,
         }
         train_target_ts = TimeSeries.from_dataframe(train_df, **ts_kwargs)
-        val_target_ts = (
-            TimeSeries.from_dataframe(val_df, **ts_kwargs)
-            if val_df is not None and len(val_df) > 0
-            else None
-        )
-        test_target_ts = (
-            TimeSeries.from_dataframe(test_df, **ts_kwargs)
-            if test_df is not None and len(test_df) > 0
-            else None
-        )
+        val_target_ts = TimeSeries.from_dataframe(val_df, **ts_kwargs) if val_df is not None and len(val_df) > 0 else None
+        test_target_ts = TimeSeries.from_dataframe(test_df, **ts_kwargs) if test_df is not None and len(test_df) > 0 else None
 
-        cov_kwargs = {"time_col": "date", "value_cols": feature_cols, "fill_missing_dates": True, "freq": "B"}
+        cov_kwargs = {
+            "time_col": "t_idx",
+            "value_cols": feature_cols + ["wd_sin", "wd_cos"],
+            "fill_missing_dates": False,
+        }
         cov_ts_train = TimeSeries.from_dataframe(train_df, **cov_kwargs) if feature_cols else None
-        cov_ts_val = (
-            TimeSeries.from_dataframe(val_df, **cov_kwargs)
-            if feature_cols and val_df is not None and len(val_df) > 0
-            else None
-        )
-        cov_ts_test = (
-            TimeSeries.from_dataframe(test_df, **cov_kwargs)
-            if feature_cols and test_df is not None and len(test_df) > 0
-            else None
-        )
+        cov_ts_val = TimeSeries.from_dataframe(val_df, **cov_kwargs) if feature_cols and val_df is not None and len(val_df) > 0 else None
+        cov_ts_test = TimeSeries.from_dataframe(test_df, **cov_kwargs) if feature_cols and test_df is not None and len(test_df) > 0 else None
 
         if static_mode != "none":
             static_df = static_covs[str(code)]
@@ -179,6 +199,7 @@ def build_datasets(
                 test_target_ts = test_target_ts.with_static_covariates(static_df)
 
         dataset["tickers"].append(str(code))
+        dataset["date_index"][str(code)] = group["date"].tolist()
         dataset["train"]["target"].append(train_target_ts)
         dataset["train"]["cov"].append(cov_ts_train)
         dataset["val"]["target"].append(val_target_ts)
@@ -204,6 +225,12 @@ def parse_args() -> argparse.Namespace:
         help="Input chunk length; series shorter than this are dropped.",
     )
     parser.add_argument(
+        "--scale_target",
+        choices=["none", "mean", "zscore"],
+        default="none",
+        help="Scale target/garch by train stats: 'mean' (divide by mean) or 'zscore' ((x-mean)/std).",
+    )
+    parser.add_argument(
         "--static_mode",
         choices=["industry", "industry_ticker", "ticker", "none"],
         default="industry_ticker",
@@ -226,6 +253,7 @@ def main() -> None:
         test_frac=args.test_frac,
         input_chunk_length=args.input_chunk_length,
         static_mode=args.static_mode,
+        scale_target=args.scale_target,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

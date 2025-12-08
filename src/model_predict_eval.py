@@ -18,6 +18,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", required=True, help="Path to trained model (.pth)")
     parser.add_argument("--output", default=None, help="Output directory for metrics and plots.")
     parser.add_argument(
+        "--invert_train_scale",
+        choices=["none", "mean", "zscore"],
+        default="none",
+        help="If dataset was scaled, invert using stored train stats: 'mean' (multiply by mean) or 'zscore' (x*std+mean).",
+    )
+    parser.add_argument(
         "--use_log_target",
         action="store_true",
         help="Set if training used log1p targets (applies expm1 to predictions).",
@@ -55,7 +61,10 @@ def _combine_covariates(
 
 
 def _invert_log(values: np.ndarray, use_log_target: bool) -> np.ndarray:
-    return np.expm1(values) if use_log_target else values
+    if not use_log_target:
+        return values
+    eps = 1
+    return np.exp(values) - eps
 
 
 def main() -> None:
@@ -83,6 +92,10 @@ def main() -> None:
     val_covs: List[Optional[TimeSeries]]   = _cast_series_list(_prepare_covariates(dataset["val"]["cov"]))
     test_covs: List[Optional[TimeSeries]]  = _cast_series_list(_prepare_covariates(dataset["test"]["cov"]))
     tickers: List[str] = dataset.get("tickers", [])
+    target_means = dataset.get("target_means", {}) if isinstance(dataset, dict) else {}
+    target_stds = dataset.get("target_stds", {}) if isinstance(dataset, dict) else {}
+    trading_calendar = dataset.get("trading_calendar", [])
+    date_index = dataset.get("date_index", {})
 
     import torch
     from darts.models import TSMixerModel
@@ -139,6 +152,22 @@ def main() -> None:
         true_vals = truth_df.iloc[:, 0].to_numpy()
         garch_vals = truth_df.iloc[:, 1].to_numpy()
 
+        # 返還縮放（mean 或 zscore）
+        if args.invert_train_scale != "none":
+            code_key = ticker
+            if code_key not in target_means and str(code_key) in target_means:
+                code_key = str(code_key)
+            mean_scale = float(target_means.get(code_key, 1.0))
+            std_scale = float(target_stds.get(code_key, 1.0))
+            if args.invert_train_scale == "mean":
+                pred_vals = pred_vals * mean_scale
+                true_vals = true_vals * mean_scale
+                garch_vals = garch_vals * mean_scale
+            elif args.invert_train_scale == "zscore":
+                pred_vals = pred_vals * std_scale + mean_scale
+                true_vals = true_vals * std_scale + mean_scale
+                garch_vals = garch_vals * std_scale + mean_scale
+
         pred_vals = _invert_log(pred_vals, args.use_log_target)
         true_vals = _invert_log(true_vals, args.use_log_target)
         garch_vals = _invert_log(garch_vals, args.use_log_target)
@@ -148,7 +177,28 @@ def main() -> None:
         mae_garch = float(np.mean(np.abs(garch_vals - true_vals)))
         rmse_garch = float(np.sqrt(np.mean((garch_vals - true_vals) ** 2)))
 
-        results.append((ticker, mae_model, rmse_model, mae_garch, rmse_garch))
+        # QLIKE 評估（只在真實值與預測皆為正時計算）
+        eps = 1e-12
+        mask_model = (true_vals > eps) & (pred_vals > eps)
+        mask_garch = (true_vals > eps) & (garch_vals > eps)
+        if mask_model.any():
+            qlike_model = float(
+                np.mean(
+                    np.log(pred_vals[mask_model]) + true_vals[mask_model] / pred_vals[mask_model]
+                )
+            )
+        else:
+            qlike_model = float("nan")
+        if mask_garch.any():
+            qlike_garch = float(
+                np.mean(
+                    np.log(garch_vals[mask_garch]) + true_vals[mask_garch] / garch_vals[mask_garch]
+                )
+            )
+        else:
+            qlike_garch = float("nan")
+
+        results.append((ticker, mae_model, rmse_model, mae_garch, rmse_garch, qlike_model, qlike_garch))
         print(
             f"{ticker}: MAE_model={mae_model:.6f}, RMSE_model={rmse_model:.6f}, "
             f"MAE_garch={mae_garch:.6f}, RMSE_garch={rmse_garch:.6f}"
@@ -157,11 +207,18 @@ def main() -> None:
         # Plot predictions vs actuals and GARCH baseline
         import matplotlib.pyplot as plt  # local import to keep dependency scope narrow
 
-        dates = test_ts.time_index
+        # 將 t_idx 轉回實際日期以便繪圖
+        if trading_calendar:
+            cal = np.array(trading_calendar)
+            dates = cal[test_ts.time_index.astype(int)]
+            dates_pred = cal[preds.time_index.astype(int)]
+        else:
+            dates = test_ts.time_index
+            dates_pred = preds.time_index
 
         plt.figure(figsize=(10, 4))
         plt.plot(dates, np.clip(true_vals,  1e-8, None), label="True", linewidth=1.5)
-        plt.plot(dates, np.clip(pred_vals,  1e-8, None), label="TSMixer", linewidth=1.2)
+        plt.plot(dates_pred, np.clip(pred_vals,  1e-8, None), label="TSMixer", linewidth=1.2)
         plt.plot(dates, np.clip(garch_vals, 1e-8, None), label="GARCH", linewidth=1.0, linestyle="--")
         plt.title(f"{ticker} - Test Forecasts")
         plt.xlabel("Date")
@@ -201,7 +258,7 @@ def main() -> None:
     metrics_path = out_dir / "metrics.csv"
     with open(metrics_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(["code", "MAE_model", "RMSE_model", "MAE_garch", "RMSE_garch"])
+        writer.writerow(["code", "MAE_model", "RMSE_model", "MAE_garch", "RMSE_garch", "QLIKE_model", "QLIKE_garch"])
         for row in results:
             writer.writerow(row)
     print(f"Evaluation metrics saved to {metrics_path}")

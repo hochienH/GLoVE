@@ -109,6 +109,7 @@ def main() -> None:
             loss_fn=WeightedLoss(args.lambda_weight),
             random_state=seed_i,
             optimizer_kwargs={"lr": lr},
+            add_encoders=None,
             pl_trainer_kwargs={
                 "accelerator": accelerator,
                 "devices": devices,

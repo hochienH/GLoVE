@@ -77,6 +77,7 @@ class TSMixerOptunaRunner:
             optimizer_kwargs={"lr": lr},
             save_checkpoints=False,
             force_reset=True,
+            add_encoders=None,
             pl_trainer_kwargs={
                 "accelerator": self.accelerator,
                 "devices": self.devices,

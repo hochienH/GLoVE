@@ -28,6 +28,52 @@ class WeightedLoss(nn.Module):
         loss_garch = self.mse(pred_vol, garch_vol)
         return self.lambda_weight * loss_true + (1 - self.lambda_weight) * loss_garch
 
+# class WeightedLoss(nn.Module):
+#     """
+#     三部份：
+#       1) True vs pred 的 QLIKE（在還原後的 RV 空間）
+#       2) True vs pred 的 RMSE（同樣在 RV 空間）
+#       3) GARCH vs pred 的 MSE（在 RV 空間，保留原本設計）
+
+#     注意：模型輸入的 pred / target 都是 log(1 + RV)，
+#           這裡會用 expm1 還原成 RV 再計算 loss。
+#     """
+
+#     def __init__(self, lambda_weight: float, eps: float = 1e-8):
+#         super().__init__()
+#         self.lambda_weight = lambda_weight
+#         self.eps = eps
+#         self.mse = nn.MSELoss()
+#     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+#         # pred, target: [batch, time, components] or [batch, components]
+#         if pred.dim() == 3:
+#             pred = pred.squeeze(1)
+#         if target.dim() == 3:
+#             target = target.squeeze(1)
+#         # 0: true RV (log1p 形式), 1: GARCH RV (log1p 形式)
+#         pred_log   = pred[..., 0]
+#         true_log   = target[..., 0]
+#         # garch_log  = target[..., 1]
+#         # ---- 從 log(1+RV) 還原回 RV ----
+#         # np.log1p(x) 對應 torch.expm1(x)
+#         true_rv  = torch.expm1(true_log).clamp_min(self.eps)
+#         pred_rv  = torch.expm1(pred_log).clamp_min(self.eps)
+#         # garch_rv = torch.expm1(garch_log).clamp_min(self.eps)
+#         # ---- QLIKE (true vs pred，在 RV 空間) ----
+#         ratio = true_rv / pred_rv
+#         qlike = ratio - torch.log(ratio) - 1.0   # element-wise
+#         loss_qlike = qlike.mean()
+#         # ---- RMSE (true vs pred，在 RV 空間) ----
+#         mse_true  = self.mse(pred_rv, true_rv)
+#         loss_rmse = torch.sqrt(mse_true + self.eps)
+#         # # ---- MSE vs GARCH（保留原本概念，在 RV 空間） ----
+#         # loss_garch = self.mse(pred_rv, garch_rv)
+#         # ---- 組合 ----
+#         # lambda_weight 控制 QLIKE / RMSE 的比例
+#         total_loss  = self.lambda_weight * loss_rmse + (1.0 - self.lambda_weight) * loss_qlike
+#         # total_loss = total_loss + loss_garch
+#         return total_loss
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -236,7 +282,7 @@ def main() -> None:
         optimizer_kwargs={"lr": args.lr},
         lr_scheduler_cls=lr_scheduler_cls,
         lr_scheduler_kwargs=lr_scheduler_kwargs,
-        add_encoders={"cyclic": {"future": ["dayofweek"]}},
+        add_encoders=None,
         pl_trainer_kwargs=pl_trainer_kwargs,
     )
 

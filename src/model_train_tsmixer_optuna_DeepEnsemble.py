@@ -87,9 +87,10 @@ def main() -> None:
         seed_i = args.seed + i
         torch.manual_seed(seed_i)
         np.random.seed(seed_i)
+
         model_path = base_path.with_name(f"{base_path.stem}_{i+1}{base_path.suffix}")
         model_name = f"TSMixer_seed_{i+1}"
-        early_stop_final = EarlyStopping(monitor="val_loss", patience=5, mode="min")
+
         final_model = TSMixerModel(
             input_chunk_length=input_chunk_length,
             output_chunk_length=1,
@@ -102,6 +103,7 @@ def main() -> None:
             loss_fn=WeightedLoss(args.lambda_weight),
             random_state=seed_i,
             optimizer_kwargs={"lr": best_lr},
+            add_encoders=None,
             pl_trainer_kwargs={
                 "accelerator": accelerator,
                 "devices": devices,

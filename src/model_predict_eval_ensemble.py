@@ -20,6 +20,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ensemble_runs", type=int, default=10, help="Number of ensemble members to load.")
     parser.add_argument("--output", default=None, help="Optional CSV path for metrics.")
     parser.add_argument(
+        "--invert_train_scale",
+        choices=["none", "mean", "zscore"],
+        default="none",
+        help="If dataset was scaled, invert using stored train stats: 'mean' (multiply by mean) or 'zscore' (x*std+mean).",
+    )
+    parser.add_argument(
         "--use_log_target",
         action="store_true",
         help="Set if training used log1p targets (applies expm1 to predictions).",
@@ -57,7 +63,10 @@ def _combine_covariates(
 
 
 def _invert_log(values: np.ndarray, use_log_target: bool) -> np.ndarray:
-    return np.expm1(values) if use_log_target else values
+    if not use_log_target:
+        return values
+    eps = 1e-4
+    return np.exp(values) - eps
 
 
 def _cast_series_list(series_list):
@@ -79,6 +88,9 @@ def main() -> None:
     val_covs: List[Optional[TimeSeries]] = _cast_series_list(dataset["val"]["cov"])
     test_covs: List[Optional[TimeSeries]] = _cast_series_list(dataset["test"]["cov"])
     tickers: List[str] = dataset.get("tickers", [])
+    target_means = dataset.get("target_means", {}) if isinstance(dataset, dict) else {}
+    target_stds = dataset.get("target_stds", {}) if isinstance(dataset, dict) else {}
+    trading_calendar = dataset.get("trading_calendar", [])
 
     # matmul precision preference
     torch.set_default_dtype(torch.float32)
@@ -146,6 +158,21 @@ def main() -> None:
         true_vals = truth_df.iloc[:, 0].to_numpy()
         garch_vals = truth_df.iloc[:, 1].to_numpy()
 
+        if args.invert_train_scale != "none":
+            code_key = ticker
+            if code_key not in target_means and str(code_key) in target_means:
+                code_key = str(code_key)
+            mean_scale = float(target_means.get(code_key, 1.0))
+            std_scale = float(target_stds.get(code_key, 1.0))
+            if args.invert_train_scale == "mean":
+                pred_vals = pred_vals * mean_scale
+                true_vals = true_vals * mean_scale
+                garch_vals = garch_vals * mean_scale
+            elif args.invert_train_scale == "zscore":
+                pred_vals = pred_vals * std_scale + mean_scale
+                true_vals = true_vals * std_scale + mean_scale
+                garch_vals = garch_vals * std_scale + mean_scale
+
         pred_vals = _invert_log(pred_vals, args.use_log_target)
         true_vals = _invert_log(true_vals, args.use_log_target)
         garch_vals = _invert_log(garch_vals, args.use_log_target)
@@ -164,7 +191,12 @@ def main() -> None:
         # Plot predictions vs actuals and GARCH baseline
         import matplotlib.pyplot as plt  # local import to keep dependency scope narrow
 
-        dates = test_ts.time_index
+        # 將 t_idx 轉回日期以便繪圖
+        if trading_calendar:
+            cal = np.array(trading_calendar)
+            dates = cal[test_ts.time_index.astype(int)]
+        else:
+            dates = test_ts.time_index
 
         plt.figure(figsize=(10, 4))
         plt.plot(dates, np.clip(true_vals, 1e-8, None), label="True", linewidth=1.5)
