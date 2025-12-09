@@ -284,6 +284,9 @@ def main() -> None:
         lr_scheduler_kwargs=lr_scheduler_kwargs,
         add_encoders=None,
         pl_trainer_kwargs=pl_trainer_kwargs,
+        model_name="TSMixer",
+        force_reset=True,
+        save_checkpoints=True,
     )
 
     has_val = any(ts is not None for ts in val_targets)
@@ -299,6 +302,7 @@ def main() -> None:
         verbose=False,
     )
 
+    model = TSMixerModel.load_from_checkpoint(model_name="TSMixer", best=True)
     model_path = pathlib.Path(args.model_path)
     model_path.parent.mkdir(parents=True, exist_ok=True)
     model.save(str(model_path))
