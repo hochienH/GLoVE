@@ -63,6 +63,16 @@ class TSMixerOptunaRunner:
         early_stop = EarlyStopping(monitor="val_loss", patience=args.patience, mode="min")
         callbacks = [pruning_cb, early_stop]
 
+        pl_trainer_kwargs = {
+            "accelerator": self.accelerator,
+            "devices": self.devices,
+            "default_root_dir": args.log_dir,
+            "enable_progress_bar": False,
+            "callbacks": callbacks,
+            "gradient_clip_val": getattr(args, "grad_clip", 0.5),
+            "precision": "bf16-mixed" if self.accelerator == "gpu" else 32,
+        }
+
         model = TSMixerModel(
             input_chunk_length=self.input_chunk_length,
             output_chunk_length=1,
@@ -78,14 +88,7 @@ class TSMixerOptunaRunner:
             save_checkpoints=False,
             force_reset=True,
             add_encoders=None,
-            pl_trainer_kwargs={
-                "accelerator": self.accelerator,
-                "devices": self.devices,
-                "default_root_dir": args.log_dir,
-                "enable_progress_bar": False,
-                "callbacks": callbacks,
-                "precision": "bf16-mixed" if self.accelerator == "gpu" else 32,
-            },
+            pl_trainer_kwargs=pl_trainer_kwargs,
         )
 
         model.fit(

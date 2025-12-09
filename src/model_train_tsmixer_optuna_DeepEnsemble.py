@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ensemble_runs", type=int, default=10, help="Number of seeds/models to train.")
     parser.add_argument("--seed", type=int, default=42, help="Base random seed.")
     parser.add_argument("--patience", type=int, default=5, help="EarlyStopping patience.")
+    parser.add_argument("--grad_clip", type=float, default=0.5, help="Gradient clipping value (same as model_train.py).")
     return parser.parse_args()
 
 
@@ -91,6 +92,16 @@ def main() -> None:
         model_path = base_path.with_name(f"{base_path.stem}_{i+1}{base_path.suffix}")
         model_name = f"TSMixer_seed_{i+1}"
 
+        pl_trainer_kwargs = {
+            "accelerator": accelerator,
+            "devices": devices,
+            "default_root_dir": args.log_dir,
+            "enable_progress_bar": False,
+            "gradient_clip_val": args.grad_clip,
+            "precision": "bf16-mixed" if accelerator == "gpu" else 32,
+            "callbacks": [EarlyStopping(monitor="val_loss", patience=args.patience, mode="min")],
+        }
+
         final_model = TSMixerModel(
             input_chunk_length=input_chunk_length,
             output_chunk_length=1,
@@ -104,14 +115,7 @@ def main() -> None:
             random_state=seed_i,
             optimizer_kwargs={"lr": best_lr},
             add_encoders=None,
-            pl_trainer_kwargs={
-                "accelerator": accelerator,
-                "devices": devices,
-                "default_root_dir": args.log_dir,
-                "enable_progress_bar": False,
-                "precision": "bf16-mixed" if accelerator == "gpu" else 32,
-                "callbacks": [EarlyStopping(monitor="val_loss", patience=args.patience, mode="min")],
-            },
+            pl_trainer_kwargs=pl_trainer_kwargs,
             model_name=model_name,
             force_reset=True,
             save_checkpoints=True,

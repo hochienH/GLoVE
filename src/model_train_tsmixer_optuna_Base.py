@@ -40,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pruner_startup_trials", type=int, default=10, help="Optuna MedianPruner n_startup_trials.")
     parser.add_argument("--pruner_warmup_steps", type=int, default=0, help="Optuna MedianPruner n_warmup_steps (epochs).")
     parser.add_argument("--patience", type=int, default=5, help="EarlyStopping patience.")
+    parser.add_argument("--grad_clip", type=float, default=0.5, help="Gradient clipping value (same as model_train.py).")
     return parser.parse_args()
 
 
@@ -68,6 +69,16 @@ def main() -> None:
     runner.save_trials(study)
 
     # Final training with train/val using EarlyStopping
+    pl_trainer_kwargs = {
+        "accelerator": runner.accelerator,
+        "devices": runner.devices,
+        "default_root_dir": args.log_dir,
+        "enable_progress_bar": False,
+        "gradient_clip_val": args.grad_clip,
+        "callbacks": [EarlyStopping(monitor="val_loss", patience=args.patience, mode="min")],
+        "precision": "bf16-mixed" if runner.accelerator == "gpu" else 32,
+    }
+
     final_model = TSMixerModel(
         input_chunk_length=runner.input_chunk_length,
         output_chunk_length=1,
@@ -81,14 +92,7 @@ def main() -> None:
         random_state=args.seed,
         optimizer_kwargs={"lr": best_params["lr"]},
         add_encoders=None,
-        pl_trainer_kwargs={
-            "accelerator": runner.accelerator,
-            "devices": runner.devices,
-            "default_root_dir": args.log_dir,
-            "enable_progress_bar": False,
-            "callbacks": [EarlyStopping(monitor="val_loss", patience=args.patience, mode="min")],
-            "precision": "bf16-mixed" if runner.accelerator == "gpu" else 32,
-        },
+        pl_trainer_kwargs=pl_trainer_kwargs,
         model_name="TSMixer_final",
         force_reset=True,
         save_checkpoints=True,
