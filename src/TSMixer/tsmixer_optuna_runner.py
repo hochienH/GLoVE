@@ -91,11 +91,18 @@ class TSMixerOptunaRunner:
             pl_trainer_kwargs=pl_trainer_kwargs,
         )
 
+        if self.covariate_mode == "alpha":
+            past_covs = self.train_covs
+            val_past_covs = self.val_covs
+        else:
+            past_covs = None
+            val_past_covs = None
+
         model.fit(
             series=self.train_targets,
-            past_covariates=self.train_covs,
+            past_covariates=past_covs,
             val_series=self.val_targets,
-            val_past_covariates=self.val_covs,
+            val_past_covariates=val_past_covs,
             epochs=args.epochs,
             dataloader_kwargs={"batch_size": args.batch_size},
             verbose=True,

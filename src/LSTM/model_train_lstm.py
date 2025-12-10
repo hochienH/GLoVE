@@ -123,16 +123,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--covariate_mode",
-        choices=["none", "lagged"],
+        choices=["none", "alpha"],
         default="none",
         help="LSTM 在訓練時要不要使用協變數。預設 none（完全不用，以免洩漏）；"
-        "選 lagged 會把 cov 退後 lag 天再當 future cov 使用，只提供歷史資訊。",
+        "選 alpha 會把 cov 退後 lag 天再當 future cov 使用，只提供歷史資訊。",
     )
     parser.add_argument(
         "--covariate_lag",
         type=int,
         default=1,
-        help="lagged 模式下要延後幾天的協變數（預設 1，表示用 t-1 的 cov 預測 t）。",
+        help="alpha 模式下要延後幾天的協變數（預設 1，表示用 t-1 的 cov 預測 t）。",
     )
     return parser.parse_args()
 
@@ -263,7 +263,7 @@ def main() -> None:
 
     future_covariates = None
     val_future_covariates = None
-    if args.covariate_mode == "lagged":
+    if args.covariate_mode == "alpha":
         future_covariates = _build_lagged_covariates(train_covs, args.covariate_lag)
         val_future_covariates = (
             _build_lagged_covariates(val_covs, args.covariate_lag) if has_val else None

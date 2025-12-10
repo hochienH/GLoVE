@@ -270,7 +270,6 @@ def main() -> None:
         optimizer_kwargs={"lr": args.lr},
         lr_scheduler_cls=lr_scheduler_cls,
         lr_scheduler_kwargs=lr_scheduler_kwargs,
-        add_encoders={"cyclic": {"future": ["dayofweek"]}},
         pl_trainer_kwargs=pl_trainer_kwargs,
         add_encoders=None,
         pl_trainer_kwargs=pl_trainer_kwargs,

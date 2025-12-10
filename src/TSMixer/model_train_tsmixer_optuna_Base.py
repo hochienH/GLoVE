@@ -41,6 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pruner_warmup_steps", type=int, default=0, help="Optuna MedianPruner n_warmup_steps (epochs).")
     parser.add_argument("--patience", type=int, default=5, help="EarlyStopping patience.")
     parser.add_argument("--grad_clip", type=float, default=0.5, help="Gradient clipping value (same as model_train.py).")
+    parser.add_argument("--covariate_mode", choices=["none", "alpha"], default="none", help="訓練時要不要使用協變數。預設 none（不使用alpha及營收資料訓練）")
     return parser.parse_args()
 
 
@@ -64,6 +65,7 @@ def main() -> None:
         val_covs=val_covs,
         input_chunk_length=input_chunk_length,
         use_static=use_static,
+        covariate_mode=args.covariate_mode
     )
     study, best_params = runner.optimize()
     runner.save_trials(study)
@@ -98,11 +100,18 @@ def main() -> None:
         save_checkpoints=True,
     )
 
+    if runner.covariate_mode == "alpha":
+        past_covs = runner.train_covs
+        val_past_covs = runner.val_covs
+    else:
+        past_covs = None
+        val_past_covs = None
+
     final_model.fit(
         series=runner.train_targets,
-        past_covariates=runner.train_covs,
+        past_covariates=past_covs,
         val_series=runner.val_targets,
-        val_past_covariates=runner.val_covs,
+        val_past_covariates=val_past_covs,
         epochs=args.epochs,
         dataloader_kwargs={"batch_size": args.batch_size},
         verbose=True,

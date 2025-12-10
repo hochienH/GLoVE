@@ -84,6 +84,93 @@ python src/data_visualization.py \
 ./train_all_lambdas.sh --parallel 4 --nohup  
 ./train_all_lambdas.sh --parallel 4 --log-dir my_logs
 監控訓練進度
+
+# Other files
+### model_train_tsmixer_optuna_Base.py
+- 呼叫 `tsmixer_optuna_runner.py` 搜尋超參數
+- 至少要訓練幾次 -> trials
+- 輸出最優的超參數 -> trial_csv
+- 超參數範圍 -> lr_min, lr_max, search_num_blocks, search_dropout, search_hidden_size, search_ff_size
+- 至少要有幾次完整的訓練才開始Pruned裁斷 -> pruner_startup_trials
+- 至少要訓練幾個Epoch才開始Pruned裁斷 -> pruner_warmup_steps
+- 最多搜尋多久超參數 -> optuna_timeout_sec
+```
+python src/model_train_tsmixer_optuna_Base.py `
+  --data Dataset/ts_data.pkl `
+  --trials 1 `
+  --epochs 10 `
+  --batch_size 32 `
+  --lambda_weight 1 `
+  --lr_min 1e-4 `
+  --lr_max 1e-2 `
+  --input_chunk_length 90 `
+  --log_dir logs `
+  --output_model models/base/tsmixer.pth `
+  --trial_csv outputs/optuna_lr_trials.csv `
+  --seed 42 `
+  --search_num_blocks 1 2 4 `
+  --search_dropout 0.1 0.2 0.3 `
+  --search_hidden_size 16 32 64 `
+  --search_ff_size 16 32 64 `
+  --pruner_startup_trials 10 `
+  --pruner_warmup_steps 0 ` 
+  --patience 2 `
+  --optuna_timeout_sec 3600
+```
+
+### model_train_tsmixer_optuna_DeepEnsemble.py
+- 讀取最優的超參數一組超參數，重新用不同RandomSeed訓練
+- trial_csv -> 超參數的檔案位置
+- ensemble_runs -> 重新訓練幾次
+```
+python src/model_train_tsmixer_optuna_DeepEnsemble.py `
+  --data Dataset/ts_data.pkl `
+  --epochs 10 `
+  --batch_size 32 `
+  --lambda_weight 1 `
+  --input_chunk_length 90 `
+  --log_dir logs `
+  --output_model models/DeepEnsemble/tsmixer_optuna.pth `
+  --trial_csv outputs/optuna_lr_trials.csv `
+  --ensemble_runs 10 `
+  --seed 42 `
+  --patience 2
+```
+
+### model_train_tsmixer_optuna_ParamsEnsemble.py
+- 功能和 `model_train_tsmixer_optuna_DeepEnsemble.py` 相似
+- 讀取最優的超參數`ensemble_runs`組超參數，各訓練一個模型，最終Ensemble
+- trial_csv -> 超參數的檔案位置
+- ensemble_runs -> 訓練幾組超參數
+```
+python src/model_train_tsmixer_optuna_ParamsEnsemble.py `
+  --data Dataset/ts_data.pkl `
+  --epochs 10 `
+  --batch_size 32 `
+  --lambda_weight 1 `
+  --input_chunk_length 90 `
+  --log_dir logs `
+  --output_model models/ParamsEnsemble/tsmixer_optuna.pth `
+  --trial_csv outputs/optuna_lr_trials.csv `
+  --ensemble_runs 10 `
+  --seed 42 `
+  --patience 2
+  ```
+
+### model_predict_eval_ensemble.py
+- 功能和 `model_predict_eval.py` 相似
+- 讀取 `model_base` 裡面的 `ensemble_runs` 個模型，加權平均 Eval 模型結果
+- 目前沒有 QLIKE
+```
+python src/model_predict_eval_ensemble.py `
+  --data Dataset/ts_data.pkl `
+  --model_base models/DeepEnsemble/tsmixer_optuna.pth `
+  --ensemble_runs 10 `
+  --output outputs/DeepEnsemble `
+  --invert_train_scale zscore `
+  --use_log_target 
+```
+
 # 查看日誌檔案
 tail -f logs/tsmixer_lambda0.log
 
