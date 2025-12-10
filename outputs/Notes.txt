@@ -1,0 +1,50 @@
+1. Base
+
+*不重要
+1.1 ln(R^2 + 1e-4) + ZScore + RevIN +  90
+- 在Log MSE的空間，MAE + MSE都贏
+- 在MSE空間，MAE贏, MSE輸. 有顯著的低估，不過趨勢有正確
+1.2 ln(1+R^2) + ZScore + RevIN + 250 
+- 在Log MSE的空間，MAE + MSE 都贏
+- 在MSE空間，MAE贏, MSE輸. 預測的均值是準的，趨勢也有正確，但預測不出波動群聚
+
+
+* 重要
+1.3 R^2 + ZScore + RevIN + 90 ...
+- 總結，其實就和GARCH差不多，而且小輸
+
+1.3.1 R^2 + ZScore + RevIN + 90 + Lambda 0
+- 在MSE空間，MAE小輸、MSE小輸、QLIKE小贏. 看起來非常像GARCH
+
+1.3.2 R^2 + ZScore + RevIN + 90 + Lambda 0.5
+- 在MSE空間，MAE小贏、MSE小輸、QLIKE輸. 也還是很像GARCH
+
+1.3.3 R^2 + ZScore + RevIN + 90 + Lambda 1
+- 在MSE空間，MAE小贏、MSE小輸、QLIKE小輸. 看起來超像GARCH
+
+*重要
+1.4 ln(1+R^2) + ZScore + RevIN + 90 ... 
+- 總結，Lambda越大，MAE越準越能預測趨勢，MSE越差越不能預測大波動
+- MAE在所有Lambda都比GARCH好, 而且贏很多
+- MSE只有在0比GARCH好一點, 其他輸很多
+- QLIKE在[0, 0.05]比GARCH好一點, 其他輸很多
+
+
+
+*不重要
+2. DeepEnsemble
+
+2.1 ln(1+R^2) + NOTSCALE + RevIN + 90
+- 在Log MSE的空間，MAE + MSE 都贏
+- 在MSE空間，MAE贏, MSE輸. 預測的均值是準的，趨勢也有正確，但預測不出波動群聚
+- 跟2.2比, 有RevIN比較好一點, 趨勢抓比較穩
+
+*不重要
+2.2 ln(1+R^2) + NOTSCALE + NOTRevIN + 90
+- 在Log MSE的空間，MAE + MSE 都贏
+- 在MSE空間，MAE贏, MSE輸. 預測的均值是準的，趨勢也有正確，但預測不出波動群聚
+
+
+*不重要
+2.3 ln(1+R^2) + ZScores + log + RevIN + 250
+- 在MSE空間，MAE贏, MSE輸. 預測的均值是準的，趨勢也有正確，但預測不出波動群聚

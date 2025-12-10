@@ -14,7 +14,6 @@ Dataset_reenact_yuchi
 .DS_Store
 logs
 .vscode
-outputs
 darts_logs
 lightning_logs
 models
