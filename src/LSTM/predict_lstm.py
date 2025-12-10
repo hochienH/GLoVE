@@ -52,15 +52,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--covariate_mode",
-        choices=["none", "lagged"],
+        choices=["none", "alpha"],
         default="none",
-        help="協變數使用方式：none 代表完全不用 cov；lagged 則會把 cov 往前 lag 天再傳給模型，避免使用未來資訊。",
+        help="協變數使用方式：none 代表完全不用 cov；alpha 則會把 cov 往前 lag 天再傳給模型，避免使用未來資訊。",
     )
     parser.add_argument(
         "--covariate_lag",
         type=int,
         default=1,
-        help="lagged 模式下要往前取幾天的 cov（預設 1）。",
+        help="alpha 模式下要往前取幾天的 cov（預設 1）。",
     )
     return parser.parse_args()
 
@@ -149,7 +149,7 @@ def main() -> None:
     else:
         plots_dir = rolling_dir = None
 
-    if args.covariate_mode == "lagged":
+    if args.covariate_mode == "alpha":
         train_covs_processed = _build_lagged_covariates(train_covs, args.covariate_lag)
         val_covs_processed = _build_lagged_covariates(val_covs, args.covariate_lag)
         test_covs_processed = _build_lagged_covariates(test_covs, args.covariate_lag)
@@ -177,7 +177,7 @@ def main() -> None:
         ticker = tickers[idx] if idx < len(tickers) else f"Series_{idx}"
 
         history_series = history_builder(idx)
-        history_covariates = cov_builder(idx) if args.covariate_mode == "lagged" else None
+        history_covariates = cov_builder(idx) if args.covariate_mode == "alpha" else None
         if history_series is None:
             print(f"[警告] {ticker} 缺少歷史資料，跳過。")
             continue

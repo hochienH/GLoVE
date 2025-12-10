@@ -162,7 +162,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--covariate_mode",
-        choices=["none", "lagged"],
+        choices=["none", "alpha"],
         default="none",
         help="訓練時要不要使用協變數。預設 none（不使用alpha及營收資料訓練）"
     )
@@ -272,6 +272,11 @@ def main() -> None:
         lr_scheduler_kwargs=lr_scheduler_kwargs,
         add_encoders={"cyclic": {"future": ["dayofweek"]}},
         pl_trainer_kwargs=pl_trainer_kwargs,
+        add_encoders=None,
+        pl_trainer_kwargs=pl_trainer_kwargs,
+        model_name="TSMixer",
+        force_reset=True,
+        save_checkpoints=True,
     )
 
     has_val = any(ts is not None for ts in val_targets)
@@ -290,7 +295,7 @@ def main() -> None:
         "verbose": False,
     }
 
-    if args.covariate_mode == "lagged":
+    if args.covariate_mode == "alpha":
         # Using covariates（alpha + feature）to train
         fit_kwargs["past_covariates"] = train_covs
         fit_kwargs["val_past_covariates"]=val_covs if has_val_cov else None

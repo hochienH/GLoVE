@@ -1,0 +1,128 @@
+cd C:\Users\xjp91\OneDrive\桌面\ADL\ADL-Final\Dataset
+conda activate myenv
+
+# python src\pipelines\run_alpha101_from_ohlc.py 
+python src\feature_engineering\volatility_labels_features.py
+python src\feature_engineering\merge_alpha_volatility.py
+
+conda activate ADL3
+cd C:\Users\xjp91\OneDrive\桌面\ADL\ADL-Final
+
+python src/preprocess.py `
+    --input Dataset/data/ml_dataset_alpha101_volatility.csv `
+    --output Dataset/clean.pkl `
+    --disabled_features close log_return u_hat_90 `
+    --target_col var_true_90 `
+    --garch_col garch_var_90 `
+#    --use_log_target 
+
+python src/dataset_builder.py `
+    --input Dataset/clean.pkl `
+    --output Dataset/ts_data.pkl `
+    --val_frac 0.3 `
+    --test_frac 0.3 `
+    --input_chunk_length 90 `
+    --static_mode ticker `
+    --target_col var_true_90 `
+    --garch_col garch_var_90 `
+    --scale_target zscore
+
+# Base : 不搜尋 + 預設參數
+python src/model_train_tsmixer_optuna_Base.py `
+  --data Dataset/ts_data.pkl `
+  --trials 1 `
+  --epochs 10 `
+  --batch_size 32 `
+  --lambda_weight 1 `
+  --lr_min 1e-3 `
+  --lr_max 1e-3 `
+  --input_chunk_length 90 `
+  --log_dir logs `
+  --output_model models/base/tsmixer.pth `
+  --trial_csv outputs/optuna_lr_trials.csv `
+  --seed 42 `
+  --search_num_blocks 2 `
+  --search_dropout 0.2 `
+  --search_hidden_size 32 `
+  --search_ff_size 32 `
+  --pruner_startup_trials 10 `
+  --pruner_warmup_steps 0 `
+  --patience 2 `
+  --optuna_timeout_sec 3600
+
+# Base：Optuna 搜尋 + 訓練最佳模型
+python src/model_train_tsmixer_optuna_Base.py `
+  --data Dataset/ts_data.pkl `
+  --trials 100 `
+  --epochs 10 `
+  --batch_size 32 `
+  --lambda_weight 1 `
+  --lr_min 1e-4 `
+  --lr_max 1e-2 `
+  --input_chunk_length 90 `
+  --log_dir logs `
+  --output_model models/base/tsmixer.pth `
+  --trial_csv outputs/optuna_lr_trials.csv `
+  --seed 42 `
+  --search_num_blocks 1 2 3 4 `
+  --search_dropout 0.1 0.2 0.3 `
+  --search_hidden_size 16 32 64 `
+  --search_ff_size 16 32 64 `
+  --pruner_startup_trials 10 `
+  --pruner_warmup_steps 0 `
+  --patience 2 `
+  --optuna_timeout_sec 3600
+
+# DeepEnsemble：讀 CSV 最優參數，訓練 10 個 seed 模型
+python src/model_train_tsmixer_optuna_DeepEnsemble.py `
+  --data Dataset/ts_data.pkl `
+  --epochs 10 `
+  --batch_size 32 `
+  --lambda_weight 1 `
+  --input_chunk_length 90 `
+  --log_dir logs `
+  --output_model models/DeepEnsemble/tsmixer_optuna.pth `
+  --trial_csv outputs/optuna_lr_trials.csv `
+  --ensemble_runs 10 `
+  --seed 42 `
+  --patience 2
+
+# ParamsEnsemble：讀 CSV 前 10 組參數，各訓練 1 個模型
+python src/model_train_tsmixer_optuna_ParamsEnsemble.py `
+  --data Dataset/ts_data.pkl `
+  --epochs 10 `
+  --batch_size 32 `
+  --lambda_weight 1 `
+  --input_chunk_length 90 `
+  --log_dir logs `
+  --output_model models/ParamsEnsemble/tsmixer_optuna.pth `
+  --trial_csv outputs/optuna_lr_trials.csv `
+  --ensemble_runs 10 `
+  --seed 42 `
+  --patience 2
+
+# 評估 Base（圖與 metrics 會放在 outputs/Base）
+python src/model_predict_eval.py `
+  --data Dataset/ts_data.pkl `
+  --model models/base/tsmixer.pth `
+  --output outputs/Base `
+  --invert_train_scale zscore `
+  --use_log_target 
+
+# 評估 DeepEnsemble（圖與 metrics 會放在 outputs/DeepEnsemble）
+python src/model_predict_eval_ensemble.py `
+  --data Dataset/ts_data.pkl `
+  --model_base models/DeepEnsemble/tsmixer_optuna.pth `
+  --ensemble_runs 10 `
+  --output outputs/DeepEnsemble `
+  --invert_train_scale zscore `
+  --use_log_target 
+
+# 評估 ParamsEnsemble（圖與 metrics 會放在 outputs/ParamsEnsemble）
+python src/model_predict_eval_ensemble.py `
+  --data Dataset/ts_data.pkl `
+  --model_base models/ParamsEnsemble/tsmixer_optuna.pth `
+  --ensemble_runs 10 `
+  --output outputs/ParamsEnsemble `
+  --invert_train_scale zscore `
+  --use_log_target 

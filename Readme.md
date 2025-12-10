@@ -1,34 +1,37 @@
 # How to reenact the result and further comparison
 ### 0. source .venv/bin/activate
-0-1. new requirements is built by pipreqs to further allocate pip dependency.
-pip install pipreqs
-pipreqs ./src
+new requirements is built by pipreqs to further allocate pip dependency. 
+``` 
+pip install pipreqs  
+pipreqs ./src  
+```
 資料集我不提供到github上因為太大了
 
 ### 1. download newest dataset from **Releases**
-1-1. I have renamed it to Dataset_reenact_yuchi to make it different and reconogizable
 
-### 2. run following code to complete data preprocessing(14:38-14:41)
+### 2. run following code to complete data preprocessing
 ```
-python src/preprocess.py     --input Dataset_reenact_yuchi/data/ml_dataset_alpha101_volatility.csv     --output Dataset_reenact_yuchi/clean.pkl     --disabled_features close log_return u_hat_90 gjrgarch_var_90 tgarch_var_90    --use_log_target     --target_col var_true_90     --garch_col garch_var_90 
+python src/preprocess.py     --input Dataset/data/ml_dataset_alpha101_volatility.csv     --output clean.pkl     --disabled_features close log_return u_hat_90 gjrgarch_var_90 tgarch_var_90    --use_log_target     --target_col var_true_90     --garch_col garch_var_90 
 ```
-2-1. final dataset is in clean.pkl
+- `--use_log_target`: 將target_col及garch_col數據取ln(1+p)  
+Final data is in Dataset/clean.pkl
 
 ### 3. build dataset (30 secs)
 ```
-python src/dataset_builder.py --input Dataset_reenact_yuchi/clean.pkl  --output Dataset_reenact_yuchi/ts_data.pkl --val_frac 0.2 --test_frac 0.1 --input_chunk_length 90 --static_mode ticker --target_col var_true_90 --garch_col garch_var_90 
+python src/dataset_builder.py --input Dataset/clean.pkl  --output Dataset/ts_data.pkl --val_frac 0.2 --test_frac 0.1 --input_chunk_length 90 --static_mode ticker --target_col var_true_90 --garch_col garch_var_90 --scale_target zscore
 ```
+- `--scale_target`: 可調整為`mean`, `none`, `zscore`，對target_col及garch_col標準化，Eval Model時也需要打開這個功能。
 
-### 4. 訓練模型，自訂部分超參數 (1447-1451 一個iter 100秒)
-- `--covariate_mode`: 預設為`none`，不使用alpha資料；設定為`lagged`會使用alpha資料訓練
+### 4. 訓練模型，自訂部分超參數 (一個iter 100秒)
+- `--covariate_mode`: 預設為`none`，不使用alpha資料；設定為`alpha`會使用alpha資料訓練
 
 #### TSMixer
 ```
-python src/model_train.py     --data Dataset_reenact_yuchi/ts_data.pkl --lambda 0 --epochs 6 --lr 3e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --ff_size 64 --num_blocks 4 --dropout 0.1 --model_path models/tsmixer_lambda0.pth
+python src/TSMixer/model_train.py --data Dataset/ts_data.pkl --lambda 0 --epochs 6 --lr 3e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --ff_size 64 --num_blocks 4 --dropout 0.1 --model_path models/tsmixer_lambda0.pth
 ```
 #### LSTM
 ```
-python src/model_train_lstm.py     --data Dataset_reenact_yuchi/ts_data.pkl --lambda 0 --epochs 6 --lr 2e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --dropout 0.1 
+python src/LSTM/model_train_lstm.py  --data Dataset/ts_data.pkl --lambda 0 --epochs 6 --lr 2e-4 --lr_scheduler exponential --lr_gamma 0.99  --grad_clip 0.5 --hidden_size 32 --dropout 0.1 --model_path models/lstm_lambda0.pth
 ```
 #### bash批次訓練
 ```
@@ -39,14 +42,16 @@ bash train_all_lambdas.sh --parallel 4 --nohup
 - 原始的方法如果只用cpi要跑8小時1個epoch我叫gpt幫我生成mac晶片加速跟gpu加速： 結果光是用電腦內建的mac晶片就可以壓到10分鐘內一個epoch
 
 ### 5. Predict，輸出結果
-- `--covariate_mode`: 預設為`none`，不使用alpha資料；設定為`lagged`會使用alpha資料
+- `--covariate_mode`: 預設為`none`，不使用alpha資料；設定為`alpha`會使用alpha資料  
+- `--invert_train_scale`: 可調整為`mean`, `none`, `zscore`，返還波動度為真實值
+- `--use_log_target`: 若處理資料時有進行log轉換，則需要在此轉換回來
 #### TSMixer
 ```
-python src/model_predict_eval.py --data Dataset_reenact_yuchi/ts_data.pkl --model models/tsmixer_lambda0_reviselr.pth --output outputs/lambda_0_1/
+python src/model_predict_eval.py --data Dataset/ts_data.pkl --model models/tsmixer_lambda0_reviselr.pth --output outputs/lambda_0_1/
 ```
 #### LSTM
 ```
-python src/predict_lstm.py --data Dataset_reenact_yuchi/ts_data.pkl --model models/lstm.pth --split test --output outputs/lambda_0_1 --save_plots
+python src/predict_lstm.py --data Dataset/ts_data.pkl --model models/lstm.pth --split test --output outputs/lambda_0_1 --save_plots
 ```
 #### bash批次預測
 ```
@@ -54,12 +59,12 @@ bash eval_all_lambdas.sh --parallel 4
 ```
 
 ### 6. 資料視覺化和資訊整理 
-5. 輸出結果 python src/model_predict_eval.py --data Dataset_reenact_yuchi/ts_data.pkl --model models/tsmixer_lambda0_reviselr.pth --output outputs/lambda_0_1/
+5. 輸出結果 python src/model_predict_eval.py --data Dataset/ts_data.pkl --model models/tsmixer_lambda0_reviselr.pth --output outputs/lambda_0_1/
 
 
 or lstm prediction
 python src/predict_lstm.py \
-  --data Dataset_reenact_yuchi/ts_data.pkl \
+  --data Dataset/ts_data.pkl \
   --model models/lstm.pth \
   --split test \
   --output outputs/lambda_0_1

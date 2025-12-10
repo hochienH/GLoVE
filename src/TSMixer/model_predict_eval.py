@@ -3,9 +3,9 @@ import csv
 import pathlib
 import pickle
 from typing import List, Optional, Tuple
-
-import numpy as np
 import torch
+import numpy as np
+
 from darts import TimeSeries
 from darts.models import TSMixerModel
 
@@ -19,13 +19,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", required=True, help="Path to trained model (.pth)")
     parser.add_argument("--output", default=None, help="Optional folder path for metrics.")
     parser.add_argument(
+        "--invert_train_scale",
+        choices=["none", "mean", "zscore"],
+        default="none",
+        help="If dataset was scaled, invert using stored train stats: 'mean' (multiply by mean) or 'zscore' (x*std+mean).",
+    )
+    parser.add_argument(
         "--use_log_target",
         action="store_true",
         help="Set if training used log1p targets (applies expm1 to predictions).",
     )
     parser.add_argument(
         "--covariate_mode",
-        choices=["none", "lagged"],
+        choices=["none", "alpha"],
         default="none",
         help="要不要使用協變數。預設 none（不使用alpha及營收資料）"
     )
@@ -62,18 +68,10 @@ def _combine_covariates(
 
 
 def _invert_log(values: np.ndarray, use_log_target: bool) -> np.ndarray:
-    return np.expm1(values) if use_log_target else values
-
-def _qlike(true_vals: np.ndarray, pred_vals: np.ndarray, eps: float = 1e-8) -> float:
-    """
-    QLIKE loss for variance forecasts:
-    L = mean( y/h - log(y/h) - 1 ).
-    Smaller is better. Both y and h should be > 0.
-    """
-    true = np.clip(true_vals, eps, None)
-    pred = np.clip(pred_vals, eps, None)
-    ratio = true / pred
-    return float(np.mean(ratio - np.log(ratio) - 1.0))
+    if not use_log_target:
+        return values
+    eps = 1
+    return np.exp(values) - eps
 
 
 def main() -> None:
@@ -101,15 +99,15 @@ def main() -> None:
     val_covs: List[Optional[TimeSeries]]   = _cast_series_list(_prepare_covariates(dataset["val"]["cov"]))
     test_covs: List[Optional[TimeSeries]]  = _cast_series_list(_prepare_covariates(dataset["test"]["cov"]))
     tickers: List[str] = dataset.get("tickers", [])
-
-    import torch
-    from darts.models import TSMixerModel
+    target_means = dataset.get("target_means", {}) if isinstance(dataset, dict) else {}
+    target_stds = dataset.get("target_stds", {}) if isinstance(dataset, dict) else {}
+    trading_calendar = dataset.get("trading_calendar", [])
+    date_index = dataset.get("date_index", {})
 
     # 給 matmul 一點空間，不一定必要，但順手加
     torch.set_default_dtype(torch.float32)
     torch.set_float32_matmul_precision("high")
 
-    # model = TSMixerModel.load(args.model)
 
     if torch.cuda.is_available():
         accelerator = "gpu"
@@ -124,6 +122,7 @@ def main() -> None:
         devices = 1
         precision = 32
 
+
     model = TSMixerModel.load(
         args.model,
         pl_trainer_kwargs={
@@ -135,9 +134,13 @@ def main() -> None:
 
     results: List[Tuple[str, float, float, float, float]] = []
 
-    plots_dir = pathlib.Path("outputs/plots")
+    if args.output:
+        out_dir = pathlib.Path(args.output)
+    else:
+        out_dir = pathlib.Path("outputs/Base")
+    plots_dir = out_dir / "plots"
+    rolling_plots_dir = out_dir / "rolling_plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
-    rolling_plots_dir = pathlib.Path("outputs/rolling_plots")
     rolling_plots_dir.mkdir(parents=True, exist_ok=True)
 
     for idx, test_ts in enumerate(test_targets):
@@ -147,7 +150,7 @@ def main() -> None:
 
         history_series = _combine_segments(train_targets, val_targets, test_ts, idx)
 
-        if args.covariate_mode == "lagged":
+        if args.covariate_mode == "alpha":
             history_covariates = _combine_covariates(train_covs, val_covs, test_covs[idx], idx)
         else:
             history_covariates = None
@@ -170,6 +173,22 @@ def main() -> None:
         true_vals = truth_df.iloc[:, 0].to_numpy()
         garch_vals = truth_df.iloc[:, 1].to_numpy()
 
+        # 返還縮放（mean 或 zscore）
+        if args.invert_train_scale != "none":
+            code_key = ticker
+            if code_key not in target_means and str(code_key) in target_means:
+                code_key = str(code_key)
+            mean_scale = float(target_means.get(code_key, 1.0))
+            std_scale = float(target_stds.get(code_key, 1.0))
+            if args.invert_train_scale == "mean":
+                pred_vals = pred_vals * mean_scale
+                true_vals = true_vals * mean_scale
+                garch_vals = garch_vals * mean_scale
+            elif args.invert_train_scale == "zscore":
+                pred_vals = pred_vals * std_scale + mean_scale
+                true_vals = true_vals * std_scale + mean_scale
+                garch_vals = garch_vals * std_scale + mean_scale
+
         pred_vals = _invert_log(pred_vals, args.use_log_target)
         true_vals = _invert_log(true_vals, args.use_log_target)
         garch_vals = _invert_log(garch_vals, args.use_log_target)
@@ -179,12 +198,29 @@ def main() -> None:
         mae_garch = float(np.mean(np.abs(garch_vals - true_vals)))
         rmse_garch = float(np.sqrt(np.mean((garch_vals - true_vals) ** 2)))
 
-        qlike_model = _qlike(true_vals, pred_vals)
-        qlike_garch = _qlike(true_vals, garch_vals)
+        # QLIKE 評估（只在真實值與預測皆為正時計算）
+        eps = 1e-12
+        mask_model = (true_vals > eps) & (pred_vals > eps)
+        mask_garch = (true_vals > eps) & (garch_vals > eps)
+        if mask_model.any():
+            qlike_model = float(
+                np.mean(
+                    np.log(pred_vals[mask_model]) + true_vals[mask_model] / pred_vals[mask_model]
+                )
+            )
+        else:
+            qlike_model = float("nan")
+        if mask_garch.any():
+            qlike_garch = float(
+                np.mean(
+                    np.log(garch_vals[mask_garch]) + true_vals[mask_garch] / garch_vals[mask_garch]
+                )
+            )
+        else:
+            qlike_garch = float("nan")
 
 
-        results.append((ticker, mae_model, rmse_model, mae_garch, rmse_garch,
-                        qlike_model, qlike_garch))
+        results.append((ticker, mae_model, rmse_model, mae_garch, rmse_garch, qlike_model, qlike_garch))
 
         print(
             f"{ticker}: "
@@ -196,12 +232,19 @@ def main() -> None:
 
         # Plot predictions vs actuals and GARCH baseline
         import matplotlib.pyplot as plt  # local import to keep dependency scope narrow
-
-        dates = test_ts.time_index
+        
+        # 將 t_idx 轉回實際日期以便繪圖
+        if trading_calendar:
+            cal = np.array(trading_calendar)
+            dates = cal[test_ts.time_index.astype(int)]
+            dates_pred = cal[preds.time_index.astype(int)]
+        else:
+            dates = test_ts.time_index
+            dates_pred = preds.time_index
 
         plt.figure(figsize=(10, 4))
         plt.plot(dates, np.clip(true_vals,  1e-8, None), label="True", linewidth=1.5)
-        plt.plot(dates, np.clip(pred_vals,  1e-8, None), label="TSMixer", linewidth=1.2)
+        plt.plot(dates_pred, np.clip(pred_vals,  1e-8, None), label="TSMixer", linewidth=1.2)
         plt.plot(dates, np.clip(garch_vals, 1e-8, None), label="GARCH", linewidth=1.0, linestyle="--")
         plt.title(f"{ticker} - Test Forecasts")
         plt.xlabel("Date")
@@ -236,39 +279,14 @@ def main() -> None:
         plt.savefig(rolling_plots_dir /f"{ticker}.png", dpi=150)
         plt.close()
 
-
-    if args.output:
-        output_path = pathlib.Path(args.output) / "metrics.csv"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            #writer.writerow(["code", "MAE_model", "RMSE_model", "MAE_garch", "RMSE_garch"])
-            writer.writerow([
-            "code",
-            "MAE_model", "RMSE_model", "MAE_garch", "RMSE_garch",
-            "QLIKE_model", "QLIKE_garch",
-        ])
-
-            for row in results:
-                writer.writerow(row)
-        print(f"Evaluation metrics saved to {output_path}")
-
-    if results:
-        res_arr = np.array(results, dtype=object)  # ticker is str, so use object
-        mae_model_mean   = float(np.mean(res_arr[:, 1].astype(float)))
-        rmse_model_mean  = float(np.mean(res_arr[:, 2].astype(float)))
-        mae_garch_mean   = float(np.mean(res_arr[:, 3].astype(float)))
-        rmse_garch_mean  = float(np.mean(res_arr[:, 4].astype(float)))
-        qlike_model_mean = float(np.mean(res_arr[:, 5].astype(float)))
-        qlike_garch_mean = float(np.mean(res_arr[:, 6].astype(float)))
-
-        print("\n=== Overall averages across tickers ===")
-        print(f"MAE_model_mean   = {mae_model_mean:.6f}")
-        print(f"RMSE_model_mean  = {rmse_model_mean:.6f}")
-        print(f"MAE_garch_mean   = {mae_garch_mean:.6f}")
-        print(f"RMSE_garch_mean  = {rmse_garch_mean:.6f}")
-        print(f"QLIKE_model_mean = {qlike_model_mean:.6f}")
-        print(f"QLIKE_garch_mean = {qlike_garch_mean:.6f}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    metrics_path = out_dir / "metrics.csv"
+    with open(metrics_path, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["code", "MAE_model", "RMSE_model", "MAE_garch", "RMSE_garch", "QLIKE_model", "QLIKE_garch"])
+        for row in results:
+            writer.writerow(row)
+    print(f"Evaluation metrics saved to {metrics_path}")
 
 
 if __name__ == "__main__":
