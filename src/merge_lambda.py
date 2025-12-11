@@ -13,7 +13,7 @@ def main() -> None:
     parser.add_argument(
         "--base_dir",
         default="outputs/Base",
-        help="根目錄，底下應該有 Lambda_* 子資料夾。",
+        help="根目錄，底下應該有 lambda_* 子資料夾。",
     )
     parser.add_argument(
         "--output_csv",
@@ -30,17 +30,17 @@ def main() -> None:
     base_dir = Path(args.base_dir)
     rows = []
 
-    # 掃所有 Lambda_* 資料夾
-    for subdir in sorted(base_dir.glob("Lambda_*")):
+    # 掃所有 lambda_* 資料夾
+    for subdir in sorted(base_dir.glob("lambda_*")):
         if not subdir.is_dir():
             continue
 
         name = subdir.name  # e.g., "Lambda_0p01"
-        if "Lambda_" not in name:
+        if "lambda_" not in name:
             continue
-        lam_str = name.split("Lambda_")[1]
+        lam_str = name.split("lambda_")[1]
         try:
-            lam_val = float(lam_str.replace("p", "."))
+            lam_val = float(lam_str.replace("_", "."))
         except ValueError:
             print(f"Warning: 無法從資料夾名稱解析 lambda: {name}")
             continue
@@ -76,7 +76,7 @@ def main() -> None:
         )
 
     if not rows:
-        print("沒有找到任何 Lambda_* metrics，可以確認資料夾與檔案是否存在。")
+        print("沒有找到任何 lambda_* metrics，可以確認資料夾與檔案是否存在。")
         return
 
     summary = pd.DataFrame(rows).sort_values("lambda_weight")

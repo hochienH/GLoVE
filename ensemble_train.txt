@@ -8,7 +8,7 @@ python src\feature_engineering\merge_alpha_volatility.py
 conda activate ADL3
 cd C:\Users\xjp91\OneDrive\桌面\ADL\ADL-Final
 
-python src/preprocess.py `
+python src/TSMixer/preprocess.py `
     --input Dataset/data/ml_dataset_alpha101_volatility.csv `
     --output Dataset/clean.pkl `
     --disabled_features close log_return u_hat_90 `
@@ -16,7 +16,7 @@ python src/preprocess.py `
     --garch_col garch_var_90 `
 #    --use_log_target 
 
-python src/dataset_builder.py `
+python src/TSMixer/dataset_builder.py `
     --input Dataset/clean.pkl `
     --output Dataset/ts_data.pkl `
     --val_frac 0.3 `
@@ -28,7 +28,7 @@ python src/dataset_builder.py `
     --scale_target zscore
 
 # Base : 不搜尋 + 預設參數
-python src/model_train_tsmixer_optuna_Base.py `
+python src/TSMixer/model_train_tsmixer_optuna_Base.py `
   --data Dataset/ts_data.pkl `
   --trials 1 `
   --epochs 10 `
@@ -51,7 +51,7 @@ python src/model_train_tsmixer_optuna_Base.py `
   --optuna_timeout_sec 3600
 
 # Base：Optuna 搜尋 + 訓練最佳模型
-python src/model_train_tsmixer_optuna_Base.py `
+python src/TSMixer/model_train_tsmixer_optuna_Base.py `
   --data Dataset/ts_data.pkl `
   --trials 100 `
   --epochs 10 `
@@ -74,7 +74,7 @@ python src/model_train_tsmixer_optuna_Base.py `
   --optuna_timeout_sec 3600
 
 # DeepEnsemble：讀 CSV 最優參數，訓練 10 個 seed 模型
-python src/model_train_tsmixer_optuna_DeepEnsemble.py `
+python src/TSMixer/model_train_tsmixer_optuna_DeepEnsemble.py `
   --data Dataset/ts_data.pkl `
   --epochs 10 `
   --batch_size 32 `
@@ -88,7 +88,7 @@ python src/model_train_tsmixer_optuna_DeepEnsemble.py `
   --patience 2
 
 # ParamsEnsemble：讀 CSV 前 10 組參數，各訓練 1 個模型
-python src/model_train_tsmixer_optuna_ParamsEnsemble.py `
+python src/TSMixer/model_train_tsmixer_optuna_ParamsEnsemble.py `
   --data Dataset/ts_data.pkl `
   --epochs 10 `
   --batch_size 32 `
@@ -102,7 +102,7 @@ python src/model_train_tsmixer_optuna_ParamsEnsemble.py `
   --patience 2
 
 # 評估 Base（圖與 metrics 會放在 outputs/Base）
-python src/model_predict_eval.py `
+python src/TSMixer/model_predict_eval.py `
   --data Dataset/ts_data.pkl `
   --model models/base/tsmixer.pth `
   --output outputs/Base `
@@ -110,7 +110,7 @@ python src/model_predict_eval.py `
   --use_log_target 
 
 # 評估 DeepEnsemble（圖與 metrics 會放在 outputs/DeepEnsemble）
-python src/model_predict_eval_ensemble.py `
+python src/TSMixer/model_predict_eval_ensemble.py `
   --data Dataset/ts_data.pkl `
   --model_base models/DeepEnsemble/tsmixer_optuna.pth `
   --ensemble_runs 10 `
@@ -119,7 +119,7 @@ python src/model_predict_eval_ensemble.py `
   --use_log_target 
 
 # 評估 ParamsEnsemble（圖與 metrics 會放在 outputs/ParamsEnsemble）
-python src/model_predict_eval_ensemble.py `
+python src/TSMixer/model_predict_eval_ensemble.py `
   --data Dataset/ts_data.pkl `
   --model_base models/ParamsEnsemble/tsmixer_optuna.pth `
   --ensemble_runs 10 `

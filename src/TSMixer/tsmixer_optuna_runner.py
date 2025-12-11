@@ -38,6 +38,7 @@ class TSMixerOptunaRunner:
         val_covs: List[Optional[TimeSeries]],
         input_chunk_length: int,
         use_static: bool,
+        covariate_mode: str,
     ):
         self.args = args
         self.train_targets = train_targets
@@ -48,6 +49,7 @@ class TSMixerOptunaRunner:
         self.use_static = use_static
         self.accelerator = "gpu" if torch.cuda.is_available() else "cpu"
         self.devices = "auto" if self.accelerator == "gpu" else 1
+        self.covariate_mode = covariate_mode
         torch.manual_seed(args.seed)
         np.random.seed(args.seed)
 

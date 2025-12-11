@@ -64,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--epochs",
         type=int,
-        default=200,
+        default=10,
         help="Number of training epochs (overridden by early stopping if enabled).",
     )
     parser.add_argument(
@@ -272,7 +272,6 @@ def main() -> None:
         lr_scheduler_kwargs=lr_scheduler_kwargs,
         pl_trainer_kwargs=pl_trainer_kwargs,
         add_encoders=None,
-        pl_trainer_kwargs=pl_trainer_kwargs,
         model_name="TSMixer",
         force_reset=True,
         save_checkpoints=True,
