@@ -182,6 +182,7 @@ def main() -> None:
     val_targets = _cast_series_list(dataset["val"]["target"])
     train_covs = _cast_series_list(_prepare_covariates(dataset["train"]["cov"]))
     val_covs = _cast_series_list(_prepare_covariates(dataset["val"]["cov"]))
+
     input_chunk_length = args.input_chunk_length or dataset.get("input_chunk_length", 90)
 
     # 裝置自動偵測：
@@ -255,7 +256,6 @@ def main() -> None:
         optimizer_cls=torch.optim.AdamW,
         lr_scheduler_cls=lr_scheduler_cls,
         lr_scheduler_kwargs=lr_scheduler_kwargs,
-        add_encoders={"cyclic": {"future": ["dayofweek"]}},
         pl_trainer_kwargs=pl_trainer_kwargs,
     )
 
@@ -268,7 +268,7 @@ def main() -> None:
         val_future_covariates = (
             _build_lagged_covariates(val_covs, args.covariate_lag) if has_val else None
         )
-    
+
     fit_kwargs = {
         "series": train_targets,
         "val_series": val_targets if has_val else None,
@@ -280,8 +280,7 @@ def main() -> None:
         fit_kwargs["future_covariates"] = future_covariates
     if val_future_covariates is not None:
         fit_kwargs["val_future_covariates"] = val_future_covariates
-    print(fit_kwargs["future_covariates"])
-    print(fit_kwargs["val_future_covariates"])
+
     model.fit(**fit_kwargs)
 
     model_path = pathlib.Path(args.model_path)
@@ -292,4 +291,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

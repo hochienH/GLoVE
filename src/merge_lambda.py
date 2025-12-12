@@ -25,6 +25,11 @@ def main() -> None:
         default="outputs/Base/lambda_metrics.png",
         help="MSE/MAE 走勢圖輸出路徑。",
     )
+    parser.add_argument(
+        "--model_type",
+        default="TXMixer",
+        help="TXMixer or LSTM",
+    )
     args = parser.parse_args()
 
     base_dir = Path(args.base_dir)
@@ -102,7 +107,7 @@ def main() -> None:
     ax1.plot(lambdas, rmse_m, marker="o", label="RMSE_model")
     ax1.plot(lambdas, rmse_g, marker="s", label="RMSE_garch")
     ax1.set_ylabel("RMSE")
-    ax1.set_title("TSMixer vs GARCH across lambda_weight")
+    ax1.set_title(f"{args.model_type} vs GARCH across lambda_weight")
     ax1.legend()
 
     # MAE
