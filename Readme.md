@@ -6,10 +6,11 @@ pip install -r requirements.txt
 ```
 
 ### 1. Download newest dataset from **Releases**
+- unzip and rename the folder to "Dataset"
 
 ### 2. Run following code to complete data preprocessing
 ```
-python src/preprocess.py     --input Dataset/ml_dataset_alpha101_volatility.csv     --output clean.pkl     --disabled_features close log_return u_hat_90 gjrgarch_var_90 tgarch_var_90    --use_log_target     --target_col var_true_90     --garch_col garch_var_90 
+python src/preprocess.py     --input Dataset/ml_dataset_alpha101_volatility.csv     --output Dataset/clean.pkl     --disabled_features close log_return u_hat_90 gjrgarch_var_90 tgarch_var_90    --use_log_target     --target_col var_true_90     --garch_col garch_var_90 
 ```
 - `--use_log_target`: 將target_col及garch_col數據取ln(1+p)，後續Eval Model時設定需與此相同
 - Final data is in Dataset/clean.pkl
