@@ -252,6 +252,7 @@ def main() -> None:
         loss_fn=WeightedLoss(args.lambda_weight),
         random_state=args.seed,
         log_tensorboard=True,
+        work_dir=args.log_dir,
         optimizer_kwargs={"lr": args.lr},
         optimizer_cls=torch.optim.AdamW,
         lr_scheduler_cls=lr_scheduler_cls,

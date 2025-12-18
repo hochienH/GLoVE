@@ -84,7 +84,7 @@ LOG_DIR="logs/$RUN_ID"
 
 mkdir -p "$MODEL_DIR/base"
 mkdir -p "$OUTPUT_DIR/base"
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR/base"
 
 echo "RUN_ID = $RUN_ID"
 echo "Models  → $MODEL_DIR"
@@ -123,7 +123,7 @@ python src/TSMixer/model_train_tsmixer_optuna_Base.py \
   --lr_min 1e-4 \
   --lr_max 1e-2 \
   --input_chunk_length 90 \
-  --log_dir $LOG_DIR \
+  --log_dir $LOG_DIR/base \
   --output_model $MODEL_DIR/base/tsmixer.pth \
   --trial_csv $OUTPUT_DIR/optuna_lr_trials.csv \
   --seed 42 \
@@ -209,9 +209,11 @@ run_train_tsmixer() {
     local lam_str=$(echo "$lam" | tr '.' '_')
 
     MODEL_LAM_DIR="$MODEL_DIR/lambda_${lam_str}"
+    LOG_LAM_DIR="$LOG_DIR/lambda_${lam_str}"
     mkdir -p "$MODEL_LAM_DIR"
+    mkdir -p "$LOG_LAM_DIR"
 
-    LOG_LAM_FILE="$LOG_DIR/lambda_${lam_str}.log"
+    LOG_LAM_FILE="$LOG_LAM_DIR/train.log"
 
     out_path="$MODEL_LAM_DIR/model.pth"
     log_file="$LOG_LAM_FILE"
@@ -233,8 +235,9 @@ run_train_tsmixer() {
         --num_blocks "$BEST_NUM_BLOCKS" \
         --dropout "$BEST_DROPOUT" \
         --model_path "$out_path" \
+        --log_dir "$LOG_LAM_DIR" \
         --covariate_mode "$COVARIATE_MODE" \
-        > "$log_file" 2>&1
+        2>&1 | tee "$log_file"
 }
 
 export -f run_train_tsmixer
