@@ -16,7 +16,7 @@ python src/preprocess.py --input Dataset/ml_dataset_alpha101_volatility.csv --ou
 - `--use_log_target`: 將target_col及garch_col數據取ln(1+p)，後續Eval Model時設定需與此相同
 - Final data is in Dataset/clean.pkl
 
-### 3. Build dataset (30 secs)
+### 3. Build dataset
 ```
 python src/dataset_builder.py --input Dataset/clean.pkl --output Dataset/ts_data.pkl --val_frac 0.2 --test_frac 0.1 --input_chunk_length 90 --static_mode ticker --target_col var_true_90 --garch_col garch_var_90 --scale_target zscore
 ```
