@@ -42,5 +42,5 @@ bash lstm_pipeline.sh --parallel 4 --use_log_target --covariate_mode alpha --inv
 - `--invert_train_scale`: 若Step 3.處理資料時有進行標準化，則需要在此返還波動度為真實值
 - 其餘參數可在.sh檔調整
 
-# Trained Model and Experimental Results
+## Trained Model and Experimental Results
 https://drive.google.com/drive/u/0/folders/1xbHQe9j2vbTLrdpKLcS7qy-QH8qNLHXI
