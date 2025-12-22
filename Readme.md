@@ -1,4 +1,6 @@
-# How to reenact the result and further comparison
+# GLoVE: GARCH-Loss Based Volatility Forcasting Experiment
+
+## How to reenact the result and further comparison
 ### 0. Set up Python virtual environment
 ``` 
 source .venv/bin/activate
